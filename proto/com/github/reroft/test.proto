@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package com.github.reroft;
+
+message TestRequest {
+    string foo = 1;
+}
+
+message TestResponse {
+    string bar = 1;
+}
+
+service Test {
+    rpc Say (TestRequest) returns (TestResponse) {}
+}
