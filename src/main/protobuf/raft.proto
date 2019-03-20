@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "com.github.rerorero.reroft";
+option java_outer_classname = "RaftProto";
+
+package com.github.rerorero.reroft;
+
+message LogEntry {
+    int64 term = 1;
+    int64 index = 2;
+}
+
+service RaftService {
+    // Invoked by leader to replicate log entries (§5.3); also used as heartbeat
+    rpc AppendEntries(AppendEntriesRequest) returns (AppendEntriesResponse) {}
+    // Invoked by candidates to gather votes
+    rpc RequestVote(RequestVoteRequest) returns (RequestVoteResponse) {}
+}
+
+message AppendEntriesRequest {
+    // leader's term
+    int64 term = 1;
+    // so follower can redirect clients
+    string leaderID = 2;
+    // index of log entry immediately preceding new ones
+    int64 prevLogIndex = 3;
+    // term of prevLogIndex entry
+    int64 prevLogTerm = 4;
+    // log entries to store (empty for heartbeat, may send more than one for efficiency)
+    repeated LogEntry Entries = 5;
+    // leader's commitIndex
+    int64 leaderCommit = 6;
+}
+
+message AppendEntriesResponse {
+    // currentTerm, for leader to update itself
+    int64 term = 1;
+    // true if follower contained entry matching prevLogIndex and prevLogTerm
+    bool success = 2;
+}
+
+message RequestVoteRequest {
+    // candidate's term
+    int64 term = 1;
+    // candidate requesting vote
+    string candidateId = 2;
+    // index of candidate's last log entry
+    int64 lastLogIndex = 3;
+    // term of candidate's last log entry
+    int64 lastLogTerm = 4;
+}
+
+message RequestVoteResponse {
+    // currentTerm, for candidate to update itself
+    int64 term = 1;
+    // true means candidate received vote
+    bool voteGranted = 2;
+}
