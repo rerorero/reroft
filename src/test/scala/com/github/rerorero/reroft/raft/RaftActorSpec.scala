@@ -1,17 +1,19 @@
 package com.github.rerorero.reroft.raft
 
 import akka.actor.ActorSystem
+import akka.stream.{ActorMaterializer, Materializer}
 import akka.testkit.{ImplicitSender, TestFSMRef, TestKit, TestProbe}
 import com.github.rerorero.reroft.fsm.{ApplyAsync, Initialize}
-import com.github.rerorero.reroft.{AppendEntriesRequest, AppendEntriesResponse}
 import com.github.rerorero.reroft.log.{LogEntry, LogRepository}
 import com.github.rerorero.reroft.test.TestUtil
+import com.github.rerorero.reroft.{AppendEntriesRequest, AppendEntriesResponse, RequestVoteRequest, RequestVoteResponse}
+import org.mockito.ArgumentMatchers._
+import org.mockito.Mockito._
 import org.scalacheck.{Arbitrary, Gen}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
-import org.mockito.ArgumentMatchers._
-import org.mockito.Mockito._
 
+import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 
 class RaftActorSpec
@@ -25,12 +27,20 @@ class RaftActorSpec
 {
   override def afterAll: Unit = {
     TestKit.shutdownActorSystem(system)
+    shutdown()
   }
 
   implicit def arbNode: Arbitrary[Node] = Arbitrary(Gen.const(Node(sample[NodeID], TestProbe().ref)))
+  implicit val ec: ExecutionContext = system.dispatcher
+  implicit val mat: Materializer =  ActorMaterializer()
+
+  def nodesForTest(len: Int): Seq[(Node, TestProbe)] = (1 to len).map{_ =>
+    val probe = TestProbe()
+    (Node(sample[NodeID], probe.ref), probe)
+  }
 
   class MockedRaftActor(
-    val nodes: Set[Node] = sample[Set[Node]],
+    val nodes: Set[Node] = sampleN[Node](3).toSet,
     val myID: NodeID = sample[NodeID],
     val minElectionTimeoutMS: Int = 150,
     val maxElectionTimeoutMS: Int = 300,
@@ -142,6 +152,32 @@ class RaftActorSpec
       verify(m.logRepo, times(1)).append(req.entries.map(LogEntry.fromMessage))
       verify(m.logRepo, times(0)).commit(any[Long])
       m.stateMachine.expectMsg(ApplyAsync(10L))
+    }
+  }
+
+  "candidate" should {
+    "start election" in {
+      val nodes = nodesForTest(3)
+      val m = new MockedRaftActor(nodes = nodes.map(_._1).toSet, myID = nodes.head._1.id, minElectionTimeoutMS = 100, maxElectionTimeoutMS = 101)
+      m.sut.setState(Follower, RaftState.empty.copy(currentTerm = 10L), 10 millisecond)
+      when(m.logRepo.lastLogIndex()).thenReturn(234L)
+      when(m.logRepo.lastLogTerm()).thenReturn(567L)
+
+      Thread.sleep(120)
+      assert(m.sut.stateName === Candidate)
+
+      assert(m.sut.stateData.currentTerm === 11L)
+      nodes.head._2.expectNoMessage(300 millisecond)
+      nodes.filter(_._1.id != m.myID).foreach(n => n._2.expectMsg(RequestVoteRequest(11L, m.myID.toString(), 234L, 567L)))
+    }
+
+    "reject vote if term is stale" in {
+      val m = new MockedRaftActor()
+      m.sut.setState(Candidate, RaftState.empty.copy(currentTerm = 10L), 10 millisecond)
+
+      m.sut ! RequestVoteRequest(9L, "hoge:1111", 3L, 4L)
+      expectMsg(RequestVoteResponse(10L, voteGranted = false))
+      assert(m.sut.stateName === Candidate)
     }
   }
 }

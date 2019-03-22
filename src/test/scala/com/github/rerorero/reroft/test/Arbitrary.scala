@@ -16,8 +16,22 @@ trait ArbitrarySet {
 
   // raft
   implicit val arbLogEntry: Arbitrary[LogEntry] = Arbitrary(Gen.resultOf(LogEntry.apply _))
-  implicit val arbAppendEntriesRequest: Arbitrary[AppendEntriesRequest] = Arbitrary(Gen.resultOf(AppendEntriesRequest.apply _))
-  implicit val arbVoteRequest: Arbitrary[RequestVoteRequest] = Arbitrary(Gen.resultOf(RequestVoteRequest.apply _))
+  implicit val arbAppendEntriesRequest: Arbitrary[AppendEntriesRequest] = Arbitrary {
+    for {
+      value <- Gen.resultOf(AppendEntriesRequest.apply _)
+      leader <- arbNodeId.arbitrary
+    } yield {
+      value.withLeaderID(leader.toString())
+    }
+  }
+  implicit val arbVoteRequest: Arbitrary[RequestVoteRequest] = Arbitrary{
+    for {
+      value <- Gen.resultOf(RequestVoteRequest.apply _)
+      nodeId <- arbNodeId.arbitrary
+    } yield {
+      value.withCandidateId(nodeId.toString())
+    }
+  }
   implicit val arbAppendEntriesRes: Arbitrary[AppendEntriesResponse] = Arbitrary(Gen.resultOf(AppendEntriesResponse.apply _))
   implicit val arbVoteRes: Arbitrary[RequestVoteResponse] = Arbitrary(Gen.resultOf(RequestVoteResponse.apply _))
   implicit val arbRaftServiceClient: Arbitrary[RaftService] = Arbitrary{

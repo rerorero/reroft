@@ -2,7 +2,6 @@ package com.github.rerorero.reroft.raft
 
 import akka.actor.{ActorRef, ActorSystem}
 import akka.http.scaladsl.Http
-import akka.pattern.ask
 import akka.stream.{ActorMaterializer, Materializer}
 import akka.util.Timeout
 import com.github.rerorero.reroft._

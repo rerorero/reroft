@@ -65,7 +65,7 @@ class RaftActor(
 ) extends LoggingFSM[Role, RaftState] {
   implicit val executionContext: ExecutionContext = context.system.dispatcher
 
-  private[this] val otherNodes = clusterNodes.filter(_.id == myID)
+  private[this] val otherNodes = clusterNodes.filter(_.id != myID)
   private[this] var electionTicker: Option[Cancellable] = None
   private[this] var heartbeatTicker: Option[Cancellable] = None
 
@@ -110,6 +110,7 @@ class RaftActor(
       val newTerm = state.currentTerm + 1
       val req = RequestVoteRequest(newTerm, myID.toString(), logRepo.lastLogIndex(), logRepo.lastLogTerm())
       otherNodes.map(_.actor ! req)
+      log.info(s"[Candidate] election ${newTerm} started!")
       stay using state.clearElectionState.copy(currentTerm = newTerm)
 
     case Event(req: RequestVoteRequest, state) =>
@@ -117,24 +118,33 @@ class RaftActor(
       // 2. If votedFor is null or candidateId, and candidate’s log is at
       //    least as up-to-date as receiver’s log, grant vote (§5.2, §5.4)
       if (req.term < state.currentTerm) {
-        log.info(s"reject ${req.candidateId} due to stale term")
-        sender ! RequestVoteResponse(state.currentTerm, voteGranted = false)
-        goto(Follower) using state.copy(leaderID = None)
-
-      } else if (state.votedFor.map(_.toString() != req.candidateId).getOrElse(false)) {
-        log.info(s"reject ${req.candidateId} because I've already voted ${state.votedFor}")
-        sender ! RequestVoteResponse(state.currentTerm, voteGranted = false)
-        stay
-
-      } else if (req.lastLogIndex < logRepo.lastLogIndex() || req.lastLogTerm < logRepo.lastLogTerm()) {
-        log.info(s"reject ${req.candidateId} dee to stale log")
+        log.info(s"[Candidate] reject ${req.candidateId} due to stale term")
         sender ! RequestVoteResponse(state.currentTerm, voteGranted = false)
         stay
 
       } else {
-        log.info(s"vote from ${req.candidateId} has accepted")
-        sender ! RequestVoteResponse(state.currentTerm, voteGranted = true)
-        stay using state.copy(votedFor = Some(NodeID.of(req.candidateId)))
+        var newState = state
+
+        if (req.term > state.currentTerm) {
+          log.info(s"[Candidate] discover new term from ${req.candidateId} term=${req.term} current=${state.currentTerm}")
+          newState = newState.copy(currentTerm = req.term)
+        }
+
+        if (state.votedFor.map(_.toString() != req.candidateId).getOrElse(false)) {
+          log.info(s"[Candidate] reject ${req.candidateId} because I've already voted ${state.votedFor}")
+          sender ! RequestVoteResponse(state.currentTerm, voteGranted = false)
+          stay using newState
+
+        } else if (req.lastLogIndex < logRepo.lastLogIndex() || req.lastLogTerm < logRepo.lastLogTerm()) {
+          log.info(s"[Candidate] reject ${req.candidateId} dee to stale log")
+          sender ! RequestVoteResponse(state.currentTerm, voteGranted = false)
+          stay using newState
+
+        } else {
+          log.info(s"[Candidate] vote from ${req.candidateId} has accepted")
+          sender ! RequestVoteResponse(state.currentTerm, voteGranted = true)
+          stay using newState.copy(votedFor = Some(NodeID.of(req.candidateId)))
+        }
       }
 
     case Event(VoteResponse(dest, res), state) =>
