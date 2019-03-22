@@ -1,27 +1,24 @@
 package com.github.rerorero.reroft.fsm
 
-import akka.actor.{Actor, ActorLogging, LoggingFSM, Props}
+import akka.actor.{Actor, ActorLogging, Props}
 
-// Applier needn't concern thread safety
-trait Applier {
-  def apply(commitIndex: Long): Unit
-}
+case class ApplyAsync(index: Long)
+case class ApplySync(index: Long)
+case object Initialize
 
-case class Apply(index: Long)
-
-class StateMachine(applier: Applier) extends Actor with ActorLogging {
+class StateMachine extends Actor with ActorLogging {
   override def receive: Receive = {
-    case Apply(index) =>
-      applier.apply(index)
-      log.info(s"commietted to ${index}")
+    case ApplyAsync(index) =>
+      // TODO: implement my application
+      log.info(s"apply async until ${index}")
+    case ApplySync(index) =>
+      log.info(s"apply sync until ${index}")
+    case Initialize =>
+      log.info(s"initialize")
   }
 }
 
 object StateMachine {
-  def props(applier: Applier) = Props(new StateMachine(applier))
+  def props() = Props(new StateMachine)
 }
 
-// TODO: remove
-object applierDummy extends Applier {
-  override def apply(commitIndex: Long): Unit = ???
-}

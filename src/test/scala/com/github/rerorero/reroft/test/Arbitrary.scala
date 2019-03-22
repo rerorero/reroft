@@ -12,8 +12,12 @@ import scala.concurrent.{ExecutionContext, Future}
 
 trait ArbitrarySet {
   def sample[T](implicit arb: Arbitrary[T]): T = arb.arbitrary.sample.get
+  def sampleN[T](length: Int)(implicit arb: Arbitrary[T]): Seq[T] = (1 to length).map(_ => sample[T])
 
   // raft
+  implicit val arbLogEntry: Arbitrary[LogEntry] = Arbitrary(Gen.resultOf(LogEntry.apply _))
+  implicit val arbAppendEntriesRequest: Arbitrary[AppendEntriesRequest] = Arbitrary(Gen.resultOf(AppendEntriesRequest.apply _))
+  implicit val arbVoteRequest: Arbitrary[RequestVoteRequest] = Arbitrary(Gen.resultOf(RequestVoteRequest.apply _))
   implicit val arbAppendEntriesRes: Arbitrary[AppendEntriesResponse] = Arbitrary(Gen.resultOf(AppendEntriesResponse.apply _))
   implicit val arbVoteRes: Arbitrary[RequestVoteResponse] = Arbitrary(Gen.resultOf(RequestVoteResponse.apply _))
   implicit val arbRaftServiceClient: Arbitrary[RaftService] = Arbitrary{
@@ -37,8 +41,5 @@ trait ArbitrarySet {
   }
 
   implicit val arbNodeId: Arbitrary[NodeID] = Arbitrary(Gen.resultOf(NodeID.apply _))
-  implicit val arbNode: Arbitrary[Node] = Arbitrary(Gen.resultOf(Node.apply _))
   implicit val arbRaftState: Arbitrary[RaftState] = Arbitrary(Gen.resultOf(RaftState.apply _))
-
-  implicit val arbConfigure: Arbitrary[Configure] = Arbitrary(Gen.resultOf(Configure.apply _))
 }

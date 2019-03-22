@@ -6,7 +6,7 @@ import akka.pattern.ask
 import akka.stream.{ActorMaterializer, Materializer}
 import akka.util.Timeout
 import com.github.rerorero.reroft._
-import com.github.rerorero.reroft.fsm.{StateMachine, applierDummy}
+import com.github.rerorero.reroft.fsm.StateMachine
 import com.github.rerorero.reroft.log.logRepositoryDummy
 import com.google.common.net.HostAndPort
 
@@ -16,13 +16,7 @@ import scala.concurrent.{ExecutionContext, Future}
 case class ServerConfig(
   clusterNodes: Set[HostAndPort],
   me: HostAndPort
-) {
-  def toConfigure(implicit mat: Materializer, system: ActorSystem, ec: ExecutionContext): Configure =
-    Configure(
-      clusterNodes.map(Node.fromAddress),
-      NodeID(me),
-    )
-}
+)
 
 class Server(system: ActorSystem, config: ServerConfig) {
   def run(port: Int): Future[Http.ServerBinding] = {
@@ -31,18 +25,18 @@ class Server(system: ActorSystem, config: ServerConfig) {
     implicit val ec: ExecutionContext = sys.dispatcher
     implicit val timeout = Timeout(5 seconds)
 
-    val stateMachine = sys.actorOf(StateMachine.props(applierDummy))
-    val raftFSM = sys.actorOf(RaftActor.props(stateMachine, logRepositoryDummy)) // TODO: dummy should be replaced
+    val stateMachine = sys.actorOf(StateMachine.props())
+    val raftFSM = sys.actorOf(RaftActor.props(
+      stateMachine,
+      logRepositoryDummy,// TODO: dummy should be replaced
+      config.clusterNodes.map(Node.fromAddress),
+      NodeID(config.me))
+    )
 
-    (raftFSM ? config.toConfigure).flatMap( _ =>
-      Http().bindAndHandleAsync(
-        RaftServiceHandler(new RaftServiceImpl(raftFSM)),
-        interface = "127.0.0.1",
-        port = port
-      ).map { b =>
-        println(s"raft server bound to ${b.localAddress}")
-        b
-      }
+    Http().bindAndHandleAsync(
+      RaftServiceHandler(new RaftServiceImpl(raftFSM)),
+      interface = "127.0.0.1",
+      port = port
     )
   }
 }
