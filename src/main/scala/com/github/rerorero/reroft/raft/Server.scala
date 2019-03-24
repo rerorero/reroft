@@ -3,13 +3,11 @@ package com.github.rerorero.reroft.raft
 import akka.actor.{ActorRef, ActorSystem}
 import akka.http.scaladsl.Http
 import akka.stream.{ActorMaterializer, Materializer}
-import akka.util.Timeout
 import com.github.rerorero.reroft._
 import com.github.rerorero.reroft.fsm.StateMachine
 import com.github.rerorero.reroft.log.logRepositoryDummy
 import com.google.common.net.HostAndPort
 
-import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
 
 case class ServerConfig(
@@ -22,7 +20,6 @@ class Server(system: ActorSystem, config: ServerConfig) {
     implicit val sys: ActorSystem = system
     implicit val mat: Materializer = ActorMaterializer()
     implicit val ec: ExecutionContext = sys.dispatcher
-    implicit val timeout = Timeout(5 seconds)
 
     val stateMachine = sys.actorOf(StateMachine.props())
     val raftFSM = sys.actorOf(RaftActor.props(

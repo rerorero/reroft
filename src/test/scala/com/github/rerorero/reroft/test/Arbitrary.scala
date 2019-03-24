@@ -12,7 +12,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 trait ArbitrarySet {
   def sample[T](implicit arb: Arbitrary[T]): T = arb.arbitrary.sample.get
-  def sampleN[T](length: Int)(implicit arb: Arbitrary[T]): Seq[T] = (1 to length).map(_ => sample[T])
+  def sampleN[T](num: Int)(implicit arb: Arbitrary[T]): List[T] = Gen.listOfN[T](num, arb.arbitrary).sample.get
 
   // raft
   implicit val arbLogEntry: Arbitrary[LogEntry] = Arbitrary(Gen.resultOf(LogEntry.apply _))
@@ -54,6 +54,6 @@ trait ArbitrarySet {
     } yield HostAndPort.fromString(s"${host}:${port}")
   }
 
-  implicit val arbNodeId: Arbitrary[NodeID] = Arbitrary(Gen.resultOf(NodeID.apply _))
+  implicit def arbNodeId: Arbitrary[NodeID] = Arbitrary(Gen.resultOf(NodeID.apply _))
   implicit val arbRaftState: Arbitrary[RaftState] = Arbitrary(Gen.resultOf(RaftState.apply _))
 }

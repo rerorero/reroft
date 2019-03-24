@@ -39,8 +39,9 @@ class RaftActorSpec
     (Node(sample[NodeID], probe.ref), probe)
   }
 
+
   class MockedRaftActor(
-    val nodes: Set[Node] = sampleN[Node](3).toSet,
+    val nodes: Set[Node] = (1 to 3).map(_ => sample[Node]).toSet,
     val myID: NodeID = sample[NodeID],
     val minElectionTimeoutMS: Int = 150,
     val maxElectionTimeoutMS: Int = 300,
@@ -178,6 +179,301 @@ class RaftActorSpec
       m.sut ! RequestVoteRequest(9L, "hoge:1111", 3L, 4L)
       expectMsg(RequestVoteResponse(10L, voteGranted = false))
       assert(m.sut.stateName === Candidate)
+      assert(m.sut.stateData.votedFor === None)
+    }
+
+    "reject vote if my log is advanced" in {
+      val m = new MockedRaftActor()
+      m.sut.setState(Candidate, RaftState.empty.copy(currentTerm = 10L), 10 millisecond)
+      when(m.logRepo.lastLogIndex()).thenReturn(100L)
+      when(m.logRepo.lastLogTerm()).thenReturn(10L)
+
+      m.sut ! RequestVoteRequest(10L, "hoge:1111", 99L, 11L)
+      expectMsg(RequestVoteResponse(10L, voteGranted = false))
+      assert(m.sut.stateName === Candidate)
+      assert(m.sut.stateData.votedFor === None)
+
+      m.sut ! RequestVoteRequest(10L, "hoge:1111", 101L, 9L)
+      expectMsg(RequestVoteResponse(10L, voteGranted = false))
+      assert(m.sut.stateName === Candidate)
+      assert(m.sut.stateData.votedFor === None)
+    }
+
+    "accept vote" in {
+      val m = new MockedRaftActor()
+      m.sut.setState(Candidate, RaftState.empty.copy(currentTerm = 10L), 10 millisecond)
+      when(m.logRepo.lastLogIndex()).thenReturn(100L)
+      when(m.logRepo.lastLogTerm()).thenReturn(10L)
+
+      m.sut ! RequestVoteRequest(10L, "hoge:1111", 100L, 11L)
+      expectMsg(RequestVoteResponse(10L, voteGranted = true))
+      assert(m.sut.stateName === Candidate)
+      assert(m.sut.stateData.votedFor === Some(NodeID.of("hoge:1111")))
+
+      // once voted, reject new vote even if it contains newer index
+      m.sut ! RequestVoteRequest(10L, "hoge:2222", 200L, 20L)
+      expectMsg(RequestVoteResponse(10L, voteGranted = false))
+      assert(m.sut.stateName === Candidate)
+      assert(m.sut.stateData.votedFor === Some(NodeID.of("hoge:1111")))
+    }
+
+    "become follower when discovered stale term" in {
+      val m = new MockedRaftActor()
+      m.sut.setState(Candidate, RaftState.empty.copy(currentTerm = 10L), 10 millisecond)
+
+      m.sut ! VoteResponse(NodeID.of("localhost:2222"),RequestVoteResponse(11L, true))
+
+      expectNoMessage(100 millisecond)
+      assert(m.sut.stateName === Follower)
+      assert(m.sut.stateData.votedFor === None)
+      assert(m.sut.stateData.granted.isEmpty)
+    }
+
+    "ignore response which contains stale term" in {
+      val m = new MockedRaftActor()
+      m.sut.setState(Candidate, RaftState.empty.copy(currentTerm = 10L), 10 millisecond)
+
+      m.sut ! VoteResponse(NodeID.of("localhost:2222"),RequestVoteResponse(9L, true))
+
+      expectNoMessage(100 millisecond)
+      assert(m.sut.stateName === Candidate)
+      assert(m.sut.stateData.granted.isEmpty)
+    }
+
+    "ignore response whose granted is false " in {
+      val m = new MockedRaftActor()
+      m.sut.setState(Candidate, RaftState.empty.copy(currentTerm = 10L), 10 millisecond)
+
+      m.sut ! VoteResponse(NodeID.of("localhost:2222"),RequestVoteResponse(10L, false))
+
+      expectNoMessage(100 millisecond)
+      assert(m.sut.stateName === Candidate)
+      assert(m.sut.stateData.granted.isEmpty)
+    }
+
+    "complete vote if accepted by majority" in {
+      val nodes = (1 to 5).map(_ => sample[Node])
+      val myID = nodes.reverse.head.id
+      val m = new MockedRaftActor(nodes = nodes.toSet, myID = myID, minElectionTimeoutMS = 1000, maxElectionTimeoutMS = 1001)
+      m.sut.setState(Candidate, RaftState.empty.copy(currentTerm = 10L), 10 millisecond)
+
+      // 1
+      m.sut ! VoteResponse(nodes(0).id, RequestVoteResponse(10L, true))
+      assert(m.sut.stateName === Candidate)
+      assert(m.sut.stateData.leaderID === None)
+      assert(m.sut.stateData.granted === Set(nodes(0).id))
+
+      // 2
+      m.sut ! VoteResponse(nodes(1).id, RequestVoteResponse(10L, true))
+      assert(m.sut.stateName === Candidate)
+      assert(m.sut.stateData.leaderID === None)
+      assert(m.sut.stateData.granted === Set(nodes(0).id, nodes(1).id))
+
+      // 3, majority
+      m.sut ! VoteResponse(nodes(2).id, RequestVoteResponse(10L, true))
+      assert(m.sut.stateName === Leader)
+      assert(m.sut.stateData.leaderID === Some(myID))
+      assert(m.sut.stateData.granted === Set(nodes(0).id, nodes(1).id, nodes(2).id))
+    }
+
+    "restart election if timouted" in {
+      val nodes = nodesForTest(3)
+      val timeout = 100
+      val m = new MockedRaftActor(nodes = nodes.map(_._1).toSet, myID = nodes.head._1.id, minElectionTimeoutMS = timeout, maxElectionTimeoutMS = timeout+1)
+      m.sut.setState(Candidate, RaftState.empty.copy(currentTerm = 10L), 10 millisecond)
+      when(m.logRepo.lastLogIndex()).thenReturn(234L)
+      when(m.logRepo.lastLogTerm()).thenReturn(567L)
+
+      // 1
+      m.sut ! VoteResponse(NodeID.of("localhost:1234"), RequestVoteResponse(10L, true))
+      assert(m.sut.stateName === Candidate)
+      assert(m.sut.stateData.leaderID === None)
+      assert(m.sut.stateData.granted === Set(NodeID.of("localhost:1234")))
+
+      // timeout
+      Thread.sleep((timeout * 1.2).toInt)
+      assert(m.sut.stateName === Candidate)
+      assert(m.sut.stateData.granted === Set())
+      // re-voted with incremented term
+      nodes.filter(_._1.id != m.myID).foreach(n => n._2.expectMsg(RequestVoteRequest(11L, m.myID.toString(), 234L, 567L)))
+    }
+
+    "become follower when discovered stale term by AppendEntriesRequest" in {
+      val m = new MockedRaftActor()
+      m.sut.setState(Candidate, RaftState.empty.copy(currentTerm = 10L), 10 millisecond)
+      when(m.logRepo.contains(any[Long], any[Long])).thenReturn(true)
+      when(m.logRepo.getCommitIndex()).thenReturn(9L)
+
+      m.sut ! AppendEntriesRequest(11L, "localhost:2222", 123L, 10L, Seq(), 1L)
+
+      expectMsg(AppendEntriesResponse(11L, true))
+      assert(m.sut.stateName === Follower)
+      assert(m.sut.stateData.leaderID === Some(NodeID.of("localhost:2222")))
+    }
+
+    "ignores AppendEntriesRequest whose term is old" in {
+      val m = new MockedRaftActor()
+      m.sut.setState(Candidate, RaftState.empty.copy(currentTerm = 10L), 10 millisecond)
+
+      m.sut ! AppendEntriesRequest(9L, "localhost:2222", 1L, 2L, Seq(), 1L)
+
+      expectMsg(AppendEntriesResponse(10L, false))
+      assert(m.sut.stateName === Candidate)
+      assert(m.sut.stateData.leaderID === None)
+    }
+  }
+
+  "leader" should {
+    "start appending log process" in {
+      val nodes = nodesForTest(3)
+      val myID = nodes.head._1.id
+      val m = new MockedRaftActor(nodes = nodes.map(_._1).toSet, myID, heartbeatIntervalMS = 1000)
+      val state = RaftState.empty.copy(
+        currentTerm = 10L,
+        leaderID = Some(myID),
+        nextIndex = Map(
+          nodes(1)._1.id -> 1L,
+          nodes(2)._1.id -> 2L,
+        )
+      )
+      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq(LogEntry(8L, 3L)))
+      when(m.logRepo.getCommitIndex()).thenReturn(2L)
+
+      m.sut.setState(Leader, state, 10 millisecond)
+      m.sut ! BroadcastAppendLog
+
+      nodes(1)._2.expectMsg(AppendEntriesRequest(10L, state.leaderID.get.toString(), 1L, 8L, Seq(LogEntry(8L, 3L).toMessage), 2L))
+      nodes(2)._2.expectMsg(AppendEntriesRequest(10L, state.leaderID.get.toString(), 2L, 8L, Seq(LogEntry(8L, 3L).toMessage), 2L))
+      nodes(0)._2.expectNoMessage(100 millisecond)
+      assert(m.sut.stateData.matchIndex === Some(Map.empty))
+
+      // ignore until responses are collected
+      m.sut ! BroadcastAppendLog
+      nodes.foreach(_._2.expectNoMessage(50 millis))
+      assert(m.sut.stateData.matchIndex === Some(Map.empty))
+    }
+
+    "continue to collect until AppendEntriesResponses are received by majority" in {
+      val nodes = nodesForTest(5)
+      val myID = nodes.head._1.id
+      val m = new MockedRaftActor(nodes = nodes.map(_._1).toSet, myID, heartbeatIntervalMS = 1000)
+      val nextIndex = Map(
+          nodes(1)._1.id -> 1L,
+          nodes(2)._1.id -> 2L,
+          nodes(3)._1.id -> 3L,
+          nodes(4)._1.id -> 4L,
+        )
+      val state = RaftState.empty.copy(
+        currentTerm = 10L,
+        leaderID = Some(myID),
+        matchIndex = Some(Map.empty),
+        nextIndex = nextIndex,
+      )
+      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq(LogEntry(8L, 8L), LogEntry(8L, 9L)))
+      when(m.logRepo.getCommitIndex()).thenReturn(2L)
+      m.sut.setState(Leader, state, 10 millisecond)
+
+      // receive from 1
+      m.sut ! AppendResponse(nodes(1)._1.id, AppendEntriesResponse(10L, true), 1L, Some(9L))
+      assert(m.sut.stateData.matchIndex === Some(Map(nodes(1)._1.id -> 9L)))
+      assert(m.sut.stateData.nextIndex === Map(
+        nodes(1)._1.id -> 9L,
+        nodes(2)._1.id -> 2L,
+        nodes(3)._1.id -> 3L,
+        nodes(4)._1.id -> 4L,
+      ))
+      verify(m.logRepo, never()).commit(any[Long])
+
+      // receive from 2
+      m.sut ! AppendResponse(nodes(2)._1.id, AppendEntriesResponse(10L, true), 2L, Some(10L))
+      assert(m.sut.stateData.matchIndex === Some(Map(
+        nodes(1)._1.id -> 9L,
+        nodes(2)._1.id -> 10L,
+      )))
+      assert(m.sut.stateData.nextIndex === Map(
+        nodes(1)._1.id -> 9L,
+        nodes(2)._1.id -> 10L,
+        nodes(3)._1.id -> 3L,
+        nodes(4)._1.id -> 4L,
+      ))
+      verify(m.logRepo, never()).commit(any[Long])
+
+      // receive from 2
+      m.sut ! AppendResponse(nodes(3)._1.id, AppendEntriesResponse(10L, true), 3L, Some(11L))
+      assert(m.sut.stateData.matchIndex === None)
+      assert(m.sut.stateData.nextIndex === Map(
+        nodes(1)._1.id -> 9L,
+        nodes(2)._1.id -> 10L,
+        nodes(3)._1.id -> 11L,
+        nodes(4)._1.id -> 4L,
+      ))
+      verify(m.logRepo, times(1)).commit(9L)
+    }
+
+    "become follower when it discovers stale" in {
+      val m = new MockedRaftActor(heartbeatIntervalMS = 1000)
+      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq(LogEntry(8L, 8L), LogEntry(8L, 9L)))
+      when(m.logRepo.getCommitIndex()).thenReturn(2L)
+      val state = RaftState.empty.copy(
+        currentTerm = 10L,
+        matchIndex = Some(Map.empty),
+        nextIndex = Map(m.nodes.head.id -> 0L)
+      )
+      m.sut.setState(Leader, state, 10 millisecond)
+
+      m.sut ! AppendResponse(m.nodes.head.id, AppendEntriesResponse(12L, true), 1L, Some(9L))
+      assert(m.sut.stateName === Follower)
+    }
+
+    "retry with decremented index when request is rejected" in {
+      val nodes = nodesForTest(5)
+      val myID = nodes.head._1.id
+      val m = new MockedRaftActor(nodes = nodes.map(_._1).toSet, myID = myID, heartbeatIntervalMS = 1000)
+      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq(LogEntry(8L, 8L), LogEntry(8L, 9L)))
+      when(m.logRepo.getCommitIndex()).thenReturn(2L)
+      val state = RaftState.empty.copy(
+        currentTerm = 10L,
+        matchIndex = Some(Map.empty),
+        nextIndex = Map(nodes(1)._1.id -> 5L)
+      )
+      m.sut.setState(Leader, state, 10 millisecond)
+
+      m.sut ! AppendResponse(nodes(1)._1.id, AppendEntriesResponse(10L, false), 5L, Some(1L))
+      nodes(1)._2.expectMsg(AppendEntriesRequest(10L, myID.toString(), 4L, 8L, Seq(LogEntry(8L, 8L), LogEntry(8L, 9L)).map(_.toMessage), 2L))
+    }
+
+    "become follower when it receives heartbeat contains newer term" in {
+      val m = new MockedRaftActor(heartbeatIntervalMS = 1000)
+      val state = RaftState.empty.copy(
+        currentTerm = 10L,
+        nextIndex = m.nodes.map(n => (n.id, 0L)).toMap,
+      )
+      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq())
+      when(m.logRepo.getCommitIndex()).thenReturn(2L)
+      m.sut.setState(Leader, state, 10 millisecond)
+
+      m.sut ! AppendEntriesRequest(11L, "localhost:2222", 0L, 0L, Seq.empty, 0L)
+
+      assert(m.sut.stateName === Follower)
+      assert(m.sut.stateData.currentTerm === 11L)
+      expectMsg(AppendEntriesResponse(11L, true))
+    }
+
+    "reject AppendEntriesRequest which has an old term" in {
+      val m = new MockedRaftActor(heartbeatIntervalMS = 1000)
+      val state = RaftState.empty.copy(
+        currentTerm = 10L,
+        nextIndex = m.nodes.map(n => (n.id, 0L)).toMap,
+      )
+      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq())
+      when(m.logRepo.getCommitIndex()).thenReturn(2L)
+      m.sut.setState(Leader, state, 10 millisecond)
+
+      m.sut ! AppendEntriesRequest(9L, "localhost:2222", 0L, 0L, Seq.empty, 0L)
+
+      assert(m.sut.stateName === Leader)
+      assert(m.sut.stateData.currentTerm === 10L)
+      expectMsg(AppendEntriesResponse(10L, false))
     }
   }
 }
