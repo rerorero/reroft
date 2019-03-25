@@ -1,4 +1,4 @@
-package com.github.rerorero.reroft.raft
+package com.github.rerorero.reroft.grpc
 
 import akka.actor.{ActorRef, ActorSystem}
 import akka.http.scaladsl.Http
@@ -6,6 +6,7 @@ import akka.stream.{ActorMaterializer, Materializer}
 import com.github.rerorero.reroft._
 import com.github.rerorero.reroft.fsm.StateMachine
 import com.github.rerorero.reroft.log.logRepositoryDummy
+import com.github.rerorero.reroft.raft.{Node, NodeID, RaftActor}
 import com.google.common.net.HostAndPort
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -37,10 +38,8 @@ class Server(system: ActorSystem, config: ServerConfig) {
   }
 }
 
-class RaftServiceImpl(raftFSM: ActorRef)(implicit mat: Materializer) extends RaftService {
+class RaftServiceImpl(raftFSM: ActorRef) extends RaftService {
   override def appendEntries(in: AppendEntriesRequest): Future[AppendEntriesResponse] = ???
-
   override def requestVote(in: RequestVoteRequest): Future[RequestVoteResponse] = ???
-
   override def clientCommand(in: ClientCommandRequest): Future[ClientCommandResponse] = ???
 }

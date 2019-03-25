@@ -4,7 +4,7 @@ import akka.actor.ActorSystem
 import akka.stream.{ActorMaterializer, Materializer}
 import akka.testkit.{ImplicitSender, TestFSMRef, TestKit, TestProbe}
 import com.github.rerorero.reroft.fsm.{Apply, Initialize}
-import com.github.rerorero.reroft.log.{LogEntry, LogRepository}
+import com.github.rerorero.reroft.log.{LogRepoEntry, LogRepository}
 import com.github.rerorero.reroft.test.TestUtil
 import com.github.rerorero.reroft.{AppendEntriesRequest, AppendEntriesResponse, RequestVoteRequest, RequestVoteResponse}
 import org.mockito.ArgumentMatchers._
@@ -130,7 +130,7 @@ class RaftActorSpec
 
       expectMsg(AppendEntriesResponse(100L, true))
       verify(m.logRepo, times(1)).removeConflicted(req.prevLogTerm, req.prevLogIndex)
-      verify(m.logRepo, times(1)).append(req.entries.map(LogEntry.fromMessage))
+      verify(m.logRepo, times(1)).append(req.entries.map(LogRepoEntry.fromMessage))
       verify(m.logRepo, times(1)).commit(10L)
       m.stateMachine.expectMsg(Apply(10L))
     }
@@ -150,7 +150,7 @@ class RaftActorSpec
 
       expectMsg(AppendEntriesResponse(100L, true))
       verify(m.logRepo, times(1)).removeConflicted(req.prevLogTerm, req.prevLogIndex)
-      verify(m.logRepo, times(1)).append(req.entries.map(LogEntry.fromMessage))
+      verify(m.logRepo, times(1)).append(req.entries.map(LogRepoEntry.fromMessage))
       verify(m.logRepo, times(0)).commit(any[Long])
       m.stateMachine.expectMsg(Apply(10L))
     }
@@ -353,14 +353,14 @@ class RaftActorSpec
           nodes(2)._1.id -> 2L,
         )
       )
-      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq(LogEntry(8L, 3L, null)))
+      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq(LogRepoEntry(8L, 3L, null)))
       when(m.logRepo.getCommitIndex()).thenReturn(2L)
 
       m.sut.setState(Leader, state, 10 millisecond)
       m.sut ! BroadcastAppendLog
 
-      nodes(1)._2.expectMsg(AppendEntriesRequest(10L, state.leaderID.get.toString(), 1L, 8L, Seq(LogEntry(8L, 3L, null).toMessage), 2L))
-      nodes(2)._2.expectMsg(AppendEntriesRequest(10L, state.leaderID.get.toString(), 2L, 8L, Seq(LogEntry(8L, 3L, null).toMessage), 2L))
+      nodes(1)._2.expectMsg(AppendEntriesRequest(10L, state.leaderID.get.toString(), 1L, 8L, Seq(LogRepoEntry(8L, 3L, null).toMessage), 2L))
+      nodes(2)._2.expectMsg(AppendEntriesRequest(10L, state.leaderID.get.toString(), 2L, 8L, Seq(LogRepoEntry(8L, 3L, null).toMessage), 2L))
       nodes(0)._2.expectNoMessage(100 millisecond)
       assert(m.sut.stateData.matchIndex === Some(Map.empty))
 
@@ -386,7 +386,7 @@ class RaftActorSpec
         matchIndex = Some(Map.empty),
         nextIndex = nextIndex,
       )
-      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq(LogEntry(8L, 8L, null), LogEntry(8L, 9L, null)))
+      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq(LogRepoEntry(8L, 8L, null), LogRepoEntry(8L, 9L, null)))
       when(m.logRepo.getCommitIndex()).thenReturn(2L)
       m.sut.setState(Leader, state, 10 millisecond)
 
@@ -429,7 +429,7 @@ class RaftActorSpec
 
     "become follower when it discovers stale" in {
       val m = new MockedRaftActor(heartbeatIntervalMS = 1000)
-      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq(LogEntry(8L, 8L, null), LogEntry(8L, 9L, null)))
+      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq(LogRepoEntry(8L, 8L, null), LogRepoEntry(8L, 9L, null)))
       when(m.logRepo.getCommitIndex()).thenReturn(2L)
       val state = RaftState.empty.copy(
         currentTerm = 10L,
@@ -446,7 +446,7 @@ class RaftActorSpec
       val nodes = nodesForTest(5)
       val myID = nodes.head._1.id
       val m = new MockedRaftActor(nodes = nodes.map(_._1).toSet, myID = myID, heartbeatIntervalMS = 1000)
-      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq(LogEntry(8L, 8L, null), LogEntry(8L, 9L, null)))
+      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq(LogRepoEntry(8L, 8L, null), LogRepoEntry(8L, 9L, null)))
       when(m.logRepo.getCommitIndex()).thenReturn(2L)
       val state = RaftState.empty.copy(
         currentTerm = 10L,
@@ -456,7 +456,7 @@ class RaftActorSpec
       m.sut.setState(Leader, state, 10 millisecond)
 
       m.sut ! AppendResponse(nodes(1)._1.id, AppendEntriesResponse(10L, false), 5L, Some(1L))
-      nodes(1)._2.expectMsg(AppendEntriesRequest(10L, myID.toString(), 4L, 8L, Seq(LogEntry(8L, 8L, null), LogEntry(8L, 9L, null)).map(_.toMessage), 2L))
+      nodes(1)._2.expectMsg(AppendEntriesRequest(10L, myID.toString(), 4L, 8L, Seq(LogRepoEntry(8L, 8L, null), LogRepoEntry(8L, 9L, null)).map(_.toMessage), 2L))
     }
 
     "become follower when it receives heartbeat contains newer term" in {
@@ -507,7 +507,7 @@ class RaftActorSpec
 
       m.sut ! command
 
-      verify(m.logRepo, times(1)).append(any[Seq[LogEntry]])
+      verify(m.logRepo, times(1)).append(any[Seq[LogRepoEntry]])
       m.stateMachine.expectMsg(Apply(100L + command.req.entries.length))
       assert(m.sut.stateData.commandQue === List(CommandQueEntity(command, 100L + command.req.entries.length)))
     }

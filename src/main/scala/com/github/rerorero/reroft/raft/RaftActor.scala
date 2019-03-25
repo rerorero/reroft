@@ -3,7 +3,7 @@ package com.github.rerorero.reroft.raft
 import akka.actor.{ActorRef, Cancellable, LoggingFSM, Props}
 import com.github.rerorero.reroft._
 import com.github.rerorero.reroft.fsm.{Apply, ApplyResult, Initialize}
-import com.github.rerorero.reroft.log.{LogRepository, LogEntry => LogRepoEntry}
+import com.github.rerorero.reroft.log.{LogRepository, LogRepoEntry}
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._

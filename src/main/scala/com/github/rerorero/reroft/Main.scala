@@ -1,7 +1,7 @@
 package com.github.rerorero.reroft
 
 import akka.actor.ActorSystem
-import com.github.rerorero.reroft.raft.{Server, ServerConfig}
+import com.github.rerorero.reroft.grpc.{Server, ServerConfig}
 import com.google.common.net.HostAndPort
 import com.typesafe.config.ConfigFactory
 
