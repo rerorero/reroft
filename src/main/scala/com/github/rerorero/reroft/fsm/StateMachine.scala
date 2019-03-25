@@ -2,17 +2,17 @@ package com.github.rerorero.reroft.fsm
 
 import akka.actor.{Actor, ActorLogging, Props}
 
-case class ApplyAsync(index: Long)
-case class ApplySync(index: Long)
+case class Apply(index: Long)
 case object Initialize
+// TODO: typed result and StateMachine
+case class ApplyResult(computed: com.google.protobuf.any.Any, index: Long)
 
 class StateMachine extends Actor with ActorLogging {
   override def receive: Receive = {
-    case ApplyAsync(index) =>
+    case Apply(index) =>
       // TODO: implement my application
       log.info(s"apply async until ${index}")
-    case ApplySync(index) =>
-      log.info(s"apply sync until ${index}")
+      sender ! ApplyResult(null, index)
     case Initialize =>
       log.info(s"initialize")
   }

@@ -38,15 +38,9 @@ class Server(system: ActorSystem, config: ServerConfig) {
 }
 
 class RaftServiceImpl(raftFSM: ActorRef)(implicit mat: Materializer) extends RaftService {
-  import mat.executionContext
+  override def appendEntries(in: AppendEntriesRequest): Future[AppendEntriesResponse] = ???
 
-  override def appendEntries(in: AppendEntriesRequest): Future[AppendEntriesResponse] = {
-    println("natoring: append: " + in.toString())
-    return Future(AppendEntriesResponse())
-  }
+  override def requestVote(in: RequestVoteRequest): Future[RequestVoteResponse] = ???
 
-  override def requestVote(in: RequestVoteRequest): Future[RequestVoteResponse] = {
-    println("natoring: request: " + in.toString())
-    return Future(RequestVoteResponse())
-  }
+  override def clientCommand(in: ClientCommandRequest): Future[ClientCommandResponse] = ???
 }

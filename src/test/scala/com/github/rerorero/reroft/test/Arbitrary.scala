@@ -4,9 +4,11 @@ import com.github.rerorero.reroft._
 import com.github.rerorero.reroft.log.LogRepository
 import com.github.rerorero.reroft.raft._
 import com.google.common.net.HostAndPort
-import org.scalacheck.{Arbitrary, Gen}
+import com.google.protobuf.ByteString
+import com.google.protobuf.any.{Any => ProtoAny}
 import org.mockito.ArgumentMatchers._
 import org.mockito.Mockito._
+import org.scalacheck.{Arbitrary, Gen}
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -14,7 +16,7 @@ trait ArbitrarySet {
   def sample[T](implicit arb: Arbitrary[T]): T = arb.arbitrary.sample.get
   def sampleN[T](num: Int)(implicit arb: Arbitrary[T]): List[T] = Gen.listOfN[T](num, arb.arbitrary).sample.get
 
-  // raft
+  implicit val arbAny: Arbitrary[ProtoAny] = Arbitrary(Gen.const(ProtoAny("", ByteString.EMPTY)))
   implicit val arbLogEntry: Arbitrary[LogEntry] = Arbitrary(Gen.resultOf(LogEntry.apply _))
   implicit val arbAppendEntriesRequest: Arbitrary[AppendEntriesRequest] = Arbitrary {
     for {
@@ -55,5 +57,10 @@ trait ArbitrarySet {
   }
 
   implicit def arbNodeId: Arbitrary[NodeID] = Arbitrary(Gen.resultOf(NodeID.apply _))
+  implicit val arbClientCommandRequest: Arbitrary[ClientCommandRequest] = Arbitrary(Gen.resultOf(ClientCommandRequest.apply _))
+  implicit val arbClientCommand: Arbitrary[ClientCommand] = Arbitrary {
+    arbClientCommandRequest.arbitrary.map(ClientCommand(java.util.UUID.randomUUID().toString, _, null))
+  }
+  implicit val arbCommandQueEntity: Arbitrary[CommandQueEntity] = Arbitrary(Gen.resultOf(CommandQueEntity.apply _))
   implicit val arbRaftState: Arbitrary[RaftState] = Arbitrary(Gen.resultOf(RaftState.apply _))
 }

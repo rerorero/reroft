@@ -1,13 +1,15 @@
 package com.github.rerorero.reroft.raft
 
 import akka.actor.{ActorRef, Cancellable, LoggingFSM, Props}
-import com.github.rerorero.reroft.fsm.{ApplyAsync, Initialize}
-import com.github.rerorero.reroft.log.{LogRepository, LogEntry => LogRepoEntry}
 import com.github.rerorero.reroft._
+import com.github.rerorero.reroft.fsm.{Apply, ApplyResult, Initialize}
+import com.github.rerorero.reroft.log.{LogRepository, LogEntry => LogRepoEntry}
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 import scala.util.Random
+
+case class CommandQueEntity(command: ClientCommand, lastLogIndex: Long)
 
 // RaftActor state
 case class RaftState(
@@ -22,6 +24,7 @@ case class RaftState(
   // for each server, index of highest log entry known to be replicated on server (initialized to 0, increases monotonically)
   // this prop also used as flag which indicates whether actor is waiting logAppendEntries response or not
   matchIndex: Option[Map[NodeID, Long]],
+  commandQue: List[CommandQueEntity],
 ) {
   def clearElectionState: RaftState = copy(
     votedFor = None,
@@ -40,10 +43,11 @@ object RaftState {
     granted = Set.empty,
     nextIndex = Map.empty,
     matchIndex = None,
+    commandQue = List.empty,
   )
 }
 
-// Role is server state
+// Role is server's state name
 sealed trait Role
 case object Follower extends Role
 case object Candidate extends Role
@@ -53,6 +57,12 @@ case object Leader extends Role
 case object ElectionTimeout
 case object StartElection
 case object BroadcastAppendLog
+case class ClientCommand(id: String, req: ClientCommandRequest, sender: ActorRef)
+
+sealed trait ClientResponse
+case class ClientSuccess(id: String, res: ClientCommandResponse) extends ClientResponse
+case class ClientRedirect(leader: NodeID) extends ClientResponse
+case class ClientFailure(id: String, e: Throwable) extends ClientResponse
 
 class RaftActor(
   val stateMachine: ActorRef,
@@ -100,6 +110,10 @@ class RaftActor(
   def nodeOf(id: NodeID) = clusterNodes.filter(_.id == id).headOption.getOrElse(throw new Exception(s"no such id in clusterNodes: ${id}"))
 
   def isMajority(n: Int) = n > (clusterNodes.size/2.0)
+
+  def flushClientCommandQueue(que: Seq[CommandQueEntity]): Unit = que.foreach { c =>
+    c.command.sender ! ClientFailure(c.command.id, new Exception("request is out of date"))
+  }
 
   def handleAppendLogRequest(req: AppendEntriesRequest, state: RaftState): (AppendEntriesResponse, RaftState) = {
     //  If one server’s current term is smaller than the other’s, then it updates its current term to the larger value.
@@ -154,7 +168,7 @@ class RaftActor(
         }
 
         // start to apply logs
-        stateMachine ! ApplyAsync(req.leaderCommit)
+        stateMachine ! Apply(req.leaderCommit)
 
         (AppendEntriesResponse(newState.currentTerm, true), newState)
       }
@@ -265,6 +279,17 @@ class RaftActor(
       log.info(s"[Candidate] discover stale leader's request ${req.leaderID}")
       sender ! AppendEntriesResponse(state.currentTerm, false)
       stay
+
+    // *************
+    // CLIENT COMMAND
+    // *************
+    case Event(command: ClientCommand, _) =>
+      log.info(s"[Candidate] receives client command, delay message")
+      // TODO: handle timeout or limit the number of retries
+      context.system.scheduler.scheduleOnce(minElectionTimeoutMS.millis/2, self, command)
+      stay
+    case Event(ApplyResult(_, _), _) =>
+      stay
   }
 
   //-----------------------
@@ -287,6 +312,21 @@ class RaftActor(
       val (res, newState) = handleAppendLogRequest(req, state)
       sender ! res
       stay using newState
+
+    // *************
+    // CLIENT COMMAND
+    // *************
+    case Event(command: ClientCommand, state) =>
+      log.info(s"[follower] receives client command")
+      state.leaderID match {
+        case Some(leader) => command.sender ! ClientRedirect(leader)
+        case None =>
+          // TODO: handle timeout or limit the number of retries
+          context.system.scheduler.scheduleOnce(heartbeatIntervalMS.millis, self, command)
+      }
+      stay
+    case Event(ApplyResult(_, _), _) =>
+      stay
   }
 
   //-----------------------
@@ -330,7 +370,11 @@ class RaftActor(
 
         if (res.term > state.currentTerm) {
           log.info(s"[Leader] detect new term from ${nodeID}")
-          goto(Follower)
+          state.commandQue.foreach(c => c.command.sender ! ClientFailure(c.command.id, new Exception("detected new term, request is now out of date")))
+          goto(Follower) using state.copy(
+            leaderID = None,
+            commandQue = List.empty,
+          )
 
         } else if (!res.success) {
           //  If AppendEntries fails because of log inconsistency decrement nextIndex and retry (§5.3)
@@ -400,13 +444,46 @@ class RaftActor(
       log.info(s"[Leader] discover new leader's request ${req.leaderID}")
       val (res, newState) = handleAppendLogRequest(req, state)
       sender ! res
+      state.commandQue.foreach(c => c.command.sender ! ClientFailure(c.command.id, new Exception("detected new leader, request is now out of date")))
       goto(Follower) using newState.copy(
-        leaderID = Some(NodeID.of(req.leaderID))
+        leaderID = Some(NodeID.of(req.leaderID)),
+        commandQue = List.empty,
       )
     case Event(req: AppendEntriesRequest, state) =>
       log.info(s"[Leader] discover stale leader's request ${req.leaderID}")
       sender ! AppendEntriesResponse(state.currentTerm, false)
       stay
+
+    // *************
+    // CLIENT COMMAND
+    // *************
+    case Event(command: ClientCommand, state) =>
+      log.info(s"[Leader] receives client command")
+
+      val lastIndex = logRepo.lastLogIndex()
+      val logs = command.req.entries.zipWithIndex.map {
+        case (e, i) => LogRepoEntry(state.currentTerm, lastIndex + i + 1, e)
+      }
+      logRepo.append(logs)
+
+      val newLastIndex = lastIndex + logs.length
+      stateMachine ! Apply(newLastIndex)
+      // TODO: handle timeout
+      self ! BroadcastAppendLog
+      log.info(s"[Leader] waiting for logs are committed until index=${newLastIndex}")
+
+      stay using state.copy(
+        // record the command with index so that sender of command (gRPC server) can wait corresponding response of the request asynchronously
+        commandQue = CommandQueEntity(command, newLastIndex) :: state.commandQue
+      )
+    case Event(ApplyResult(computed, index), state) =>
+      // takes out a command that apply has completed and returns the result to the caller
+      val (done, notYet) = state.commandQue.partition(_.lastLogIndex <= index)
+      done.foreach { c =>
+        // this is not precise because delayed responses of request also have latest computed results
+        c.command.sender ! ClientSuccess(c.command.id, ClientCommandResponse(Some(computed)))
+      }
+      stay using state.copy(commandQue = notYet)
   }
 
   onTransition {

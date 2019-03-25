@@ -24,6 +24,7 @@ resolvers += Resolver.sonatypeRepo("public")
 enablePlugins(AkkaGrpcPlugin)
 
 libraryDependencies ++= Seq(
+  "com.thesamet.scalapb" %% "scalapb-runtime" % scalapb.compiler.Version.scalapbVersion % "protobuf",
   "org.scalacheck" %% "scalacheck" % "1.14.0" % Test,
   "com.typesafe.akka" %% "akka-testkit" % "2.5.20" % Test,
   "org.scalatest" % "scalatest_2.12" % "3.0.5" % Test,

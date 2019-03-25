@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+import "google/protobuf/any.proto";
+
 option java_multiple_files = true;
 option java_package = "com.github.rerorero.reroft";
 option java_outer_classname = "RaftProto";
@@ -9,6 +11,7 @@ package com.github.rerorero.reroft;
 message LogEntry {
     int64 term = 1;
     int64 index = 2;
+    google.protobuf.Any entry = 3;
 }
 
 service RaftService {
@@ -16,6 +19,8 @@ service RaftService {
     rpc AppendEntries(AppendEntriesRequest) returns (AppendEntriesResponse) {}
     // Invoked by candidates to gather votes
     rpc RequestVote(RequestVoteRequest) returns (RequestVoteResponse) {}
+    // Invoked by client
+    rpc ClientCommand(ClientCommandRequest) returns (ClientCommandResponse) {}
 }
 
 message AppendEntriesRequest {
@@ -28,7 +33,7 @@ message AppendEntriesRequest {
     // term of prevLogIndex entry
     int64 prevLogTerm = 4;
     // log entries to store (empty for heartbeat, may send more than one for efficiency)
-    repeated LogEntry Entries = 5;
+    repeated LogEntry entries = 5;
     // leader's commitIndex
     int64 leaderCommit = 6;
 }
@@ -56,4 +61,12 @@ message RequestVoteResponse {
     int64 term = 1;
     // true means candidate received vote
     bool voteGranted = 2;
+}
+
+message ClientCommandRequest {
+    repeated google.protobuf.Any entries = 1;
+}
+
+message ClientCommandResponse {
+    google.protobuf.Any computed = 1;
 }

@@ -4,18 +4,22 @@ import com.github.rerorero.reroft.{LogEntry => GRPCLogEntry}
 case class LogEntry(
   term: Long,
   index: Long,
+  // TODO: to be type safety by using T
+  entry: com.google.protobuf.any.Any,
 ) {
-  def toMessage: GRPCLogEntry = GRPCLogEntry(term, index)
+  def toMessage: GRPCLogEntry = GRPCLogEntry(term, index, Some(entry))
 }
 
 object LogEntry {
-  def fromMessage(m: GRPCLogEntry): LogEntry = {
-    // TODO: convert
-    LogEntry(0L,0L)
-  }
+  def fromMessage(m: GRPCLogEntry): LogEntry = LogEntry(
+    term = m.term,
+    index = m.index,
+    entry = m.entry.getOrElse(null),
+  )
 }
 
 trait LogRepository {
+  // TODO: handle errors
   def empty(): Unit
   def getCommitIndex(): Long
   def lastLogTerm(): Long
