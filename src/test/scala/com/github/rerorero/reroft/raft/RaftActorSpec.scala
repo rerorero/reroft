@@ -5,7 +5,7 @@ import akka.stream.{ActorMaterializer, Materializer}
 import akka.testkit.{ImplicitSender, TestFSMRef, TestKit, TestProbe}
 import com.github.rerorero.reroft.fsm.{Apply, Initialize}
 import com.github.rerorero.reroft.log.{LogRepoEntry, LogRepository}
-import com.github.rerorero.reroft.test.TestUtil
+import com.github.rerorero.reroft.test.{TestEntry, TestUtil}
 import com.github.rerorero.reroft.{AppendEntriesRequest, AppendEntriesResponse, RequestVoteRequest, RequestVoteResponse}
 import org.mockito.ArgumentMatchers._
 import org.mockito.Mockito._
@@ -48,7 +48,7 @@ class RaftActorSpec
     val heartbeatIntervalMS: Int = 15,
   ) {
     val stateMachine = TestProbe()
-    val logRepo = mock(classOf[LogRepository])
+    val logRepo = mock(classOf[LogRepository[TestEntry]])
 
     val sut = TestFSMRef(new RaftActor(
       stateMachine.ref,
@@ -64,7 +64,7 @@ class RaftActorSpec
   "RaftServerImpl" should {
     "be initialized" in {
       val mockedSM = TestProbe()
-      val sut = TestFSMRef(new RaftActor(mockedSM.ref, sample[LogRepository], sample[Set[Node]], sample[NodeID]))
+      val sut = TestFSMRef(new RaftActor(mockedSM.ref, sample[LogRepository[TestEntry]], sample[Set[Node]], sample[NodeID]))
       assert(sut.stateName === Follower)
     }
   }
@@ -130,7 +130,7 @@ class RaftActorSpec
 
       expectMsg(AppendEntriesResponse(100L, true))
       verify(m.logRepo, times(1)).removeConflicted(req.prevLogTerm, req.prevLogIndex)
-      verify(m.logRepo, times(1)).append(req.entries.map(LogRepoEntry.fromMessage))
+      verify(m.logRepo, times(1)).append(req.entries.map(LogRepoEntry.fromMessage[TestEntry]))
       verify(m.logRepo, times(1)).commit(10L)
       m.stateMachine.expectMsg(Apply(10L))
     }
@@ -150,7 +150,7 @@ class RaftActorSpec
 
       expectMsg(AppendEntriesResponse(100L, true))
       verify(m.logRepo, times(1)).removeConflicted(req.prevLogTerm, req.prevLogIndex)
-      verify(m.logRepo, times(1)).append(req.entries.map(LogRepoEntry.fromMessage))
+      verify(m.logRepo, times(1)).append(req.entries.map(LogRepoEntry.fromMessage[TestEntry]))
       verify(m.logRepo, times(0)).commit(any[Long])
       m.stateMachine.expectMsg(Apply(10L))
     }
@@ -255,6 +255,7 @@ class RaftActorSpec
       val nodes = (1 to 5).map(_ => sample[Node])
       val myID = nodes.reverse.head.id
       val m = new MockedRaftActor(nodes = nodes.toSet, myID = myID, minElectionTimeoutMS = 1000, maxElectionTimeoutMS = 1001)
+      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq(LogRepoEntry[TestEntry](8L, 3L, sample[TestEntry])))
       m.sut.setState(Candidate, RaftState.empty.copy(currentTerm = 10L), 10 millisecond)
 
       // 1
@@ -353,14 +354,15 @@ class RaftActorSpec
           nodes(2)._1.id -> 2L,
         )
       )
-      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq(LogRepoEntry(8L, 3L, null)))
+      val dummyEntry = sample[TestEntry]
+      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq(LogRepoEntry[TestEntry](8L, 3L, dummyEntry)))
       when(m.logRepo.getCommitIndex()).thenReturn(2L)
 
       m.sut.setState(Leader, state, 10 millisecond)
       m.sut ! BroadcastAppendLog
 
-      nodes(1)._2.expectMsg(AppendEntriesRequest(10L, state.leaderID.get.toString(), 1L, 8L, Seq(LogRepoEntry(8L, 3L, null).toMessage), 2L))
-      nodes(2)._2.expectMsg(AppendEntriesRequest(10L, state.leaderID.get.toString(), 2L, 8L, Seq(LogRepoEntry(8L, 3L, null).toMessage), 2L))
+      nodes(1)._2.expectMsg(AppendEntriesRequest(10L, state.leaderID.get.toString(), 1L, 8L, Seq(LogRepoEntry(8L, 3L, dummyEntry).toMessage), 2L))
+      nodes(2)._2.expectMsg(AppendEntriesRequest(10L, state.leaderID.get.toString(), 2L, 8L, Seq(LogRepoEntry(8L, 3L, dummyEntry).toMessage), 2L))
       nodes(0)._2.expectNoMessage(100 millisecond)
       assert(m.sut.stateData.matchIndex === Some(Map.empty))
 
@@ -386,7 +388,7 @@ class RaftActorSpec
         matchIndex = Some(Map.empty),
         nextIndex = nextIndex,
       )
-      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq(LogRepoEntry(8L, 8L, null), LogRepoEntry(8L, 9L, null)))
+      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq(LogRepoEntry[TestEntry](8L, 8L, sample[TestEntry]), LogRepoEntry[TestEntry](8L, 9L, sample[TestEntry])))
       when(m.logRepo.getCommitIndex()).thenReturn(2L)
       m.sut.setState(Leader, state, 10 millisecond)
 
@@ -429,7 +431,7 @@ class RaftActorSpec
 
     "become follower when it discovers stale" in {
       val m = new MockedRaftActor(heartbeatIntervalMS = 1000)
-      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq(LogRepoEntry(8L, 8L, null), LogRepoEntry(8L, 9L, null)))
+      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq(LogRepoEntry[TestEntry](8L, 8L, sample[TestEntry]), LogRepoEntry[TestEntry](8L, 9L, sample[TestEntry])))
       when(m.logRepo.getCommitIndex()).thenReturn(2L)
       val state = RaftState.empty.copy(
         currentTerm = 10L,
@@ -446,7 +448,8 @@ class RaftActorSpec
       val nodes = nodesForTest(5)
       val myID = nodes.head._1.id
       val m = new MockedRaftActor(nodes = nodes.map(_._1).toSet, myID = myID, heartbeatIntervalMS = 1000)
-      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq(LogRepoEntry(8L, 8L, null), LogRepoEntry(8L, 9L, null)))
+      val (entry1, entry2) = (sample[TestEntry], sample[TestEntry])
+      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq(LogRepoEntry[TestEntry](8L, 8L, entry1), LogRepoEntry[TestEntry](8L, 9L, entry2)))
       when(m.logRepo.getCommitIndex()).thenReturn(2L)
       val state = RaftState.empty.copy(
         currentTerm = 10L,
@@ -456,7 +459,7 @@ class RaftActorSpec
       m.sut.setState(Leader, state, 10 millisecond)
 
       m.sut ! AppendResponse(nodes(1)._1.id, AppendEntriesResponse(10L, false), 5L, Some(1L))
-      nodes(1)._2.expectMsg(AppendEntriesRequest(10L, myID.toString(), 4L, 8L, Seq(LogRepoEntry(8L, 8L, null), LogRepoEntry(8L, 9L, null)).map(_.toMessage), 2L))
+      nodes(1)._2.expectMsg(AppendEntriesRequest(10L, myID.toString(), 4L, 8L, Seq(LogRepoEntry(8L, 8L, entry1), LogRepoEntry(8L, 9L, entry2)).map(_.toMessage), 2L))
     }
 
     "become follower when it receives heartbeat contains newer term" in {
@@ -507,7 +510,7 @@ class RaftActorSpec
 
       m.sut ! command
 
-      verify(m.logRepo, times(1)).append(any[Seq[LogRepoEntry]])
+      verify(m.logRepo, times(1)).append(any[Seq[LogRepoEntry[TestEntry]]])
       m.stateMachine.expectMsg(Apply(100L + command.req.entries.length))
       assert(m.sut.stateData.commandQue === List(CommandQueEntity(command, 100L + command.req.entries.length)))
     }

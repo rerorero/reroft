@@ -3,7 +3,8 @@ package com.github.rerorero.reroft.raft
 import akka.actor.{ActorRef, Cancellable, LoggingFSM, Props}
 import com.github.rerorero.reroft._
 import com.github.rerorero.reroft.fsm.{Apply, ApplyResult, Initialize}
-import com.github.rerorero.reroft.log.{LogRepository, LogRepoEntry}
+import com.github.rerorero.reroft.log.{LogRepoEntry, LogRepository}
+import scalapb.{GeneratedMessage, GeneratedMessageCompanion, Message}
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
@@ -64,15 +65,15 @@ case class ClientSuccess(id: String, res: ClientCommandResponse) extends ClientR
 case class ClientRedirect(leader: NodeID) extends ClientResponse
 case class ClientFailure(id: String, e: Throwable) extends ClientResponse
 
-class RaftActor(
+class RaftActor[Entry <: GeneratedMessage with Message[Entry]](
   val stateMachine: ActorRef,
-  val logRepo: LogRepository,
+  val logRepo: LogRepository[Entry],
   val clusterNodes: Set[Node],
   val myID: NodeID,
   val minElectionTimeoutMS: Int = 150,
   val maxElectionTimeoutMS: Int = 300,
   val heartbeatIntervalMS: Int = 15,
-) extends LoggingFSM[Role, RaftState] {
+)(implicit messageCompanion: GeneratedMessageCompanion[Entry]) extends LoggingFSM[Role, RaftState] {
   implicit val executionContext: ExecutionContext = context.system.dispatcher
 
   private[this] val otherNodes = clusterNodes.filter(_.id != myID)
@@ -159,7 +160,7 @@ class RaftActor(
         logRepo.removeConflicted(req.prevLogTerm, req.prevLogIndex)
 
         // (4) Append log
-        logRepo.append(req.entries.map(LogRepoEntry.fromMessage))
+        logRepo.append(req.entries.map(LogRepoEntry.fromMessage[Entry]))
 
         // (5) commit and update commitIndex
         if (req.leaderCommit > logRepo.getCommitIndex()) {
@@ -462,7 +463,7 @@ class RaftActor(
 
       val lastIndex = logRepo.lastLogIndex()
       val logs = command.req.entries.zipWithIndex.map {
-        case (e, i) => LogRepoEntry(state.currentTerm, lastIndex + i + 1, e)
+        case (e, i) => LogRepoEntry.fromMessage[Entry](LogEntry(state.currentTerm, lastIndex + i + 1, Some(e)))
       }
       logRepo.append(logs)
 
@@ -504,6 +505,6 @@ class RaftActor(
 }
 
 object RaftActor {
-  def props(stateMachine: ActorRef, log: LogRepository, nodes: Set[Node], me: NodeID) =
+  def props[Entry <: GeneratedMessage with Message[Entry]](stateMachine: ActorRef, log: LogRepository[Entry], nodes: Set[Node], me: NodeID)(implicit messageCompanion: GeneratedMessageCompanion[Entry]) =
     Props(new RaftActor(stateMachine, log, nodes, me))
 }
