@@ -3,10 +3,10 @@ package com.github.rerorero.reroft.raft
 import akka.actor.ActorSystem
 import akka.stream.{ActorMaterializer, Materializer}
 import akka.testkit.{ImplicitSender, TestFSMRef, TestKit, TestProbe}
-import com.github.rerorero.reroft.fsm.{Apply, Initialize}
+import com.github.rerorero.reroft.fsm.{Apply, ApplyResult, Initialize}
 import com.github.rerorero.reroft.log.{LogRepoEntry, LogRepository}
-import com.github.rerorero.reroft.test.{TestEntry, TestUtil}
-import com.github.rerorero.reroft.{AppendEntriesRequest, AppendEntriesResponse, RequestVoteRequest, RequestVoteResponse}
+import com.github.rerorero.reroft.test.{TestComputed, TestEntry, TestUtil}
+import com.github.rerorero.reroft._
 import org.mockito.ArgumentMatchers._
 import org.mockito.Mockito._
 import org.scalacheck.{Arbitrary, Gen}
@@ -39,7 +39,6 @@ class RaftActorSpec
     (Node(sample[NodeID], probe.ref), probe)
   }
 
-
   class MockedRaftActor(
     val nodes: Set[Node] = (1 to 3).map(_ => sample[Node]).toSet,
     val myID: NodeID = sample[NodeID],
@@ -50,7 +49,7 @@ class RaftActorSpec
     val stateMachine = TestProbe()
     val logRepo = mock(classOf[LogRepository[TestEntry]])
 
-    val sut = TestFSMRef(new RaftActor(
+    val sut = TestFSMRef(new RaftActor[TestEntry, TestComputed](
       stateMachine.ref,
       logRepo,
       nodes,
@@ -513,6 +512,33 @@ class RaftActorSpec
       verify(m.logRepo, times(1)).append(any[Seq[LogRepoEntry[TestEntry]]])
       m.stateMachine.expectMsg(Apply(100L + command.req.entries.length))
       assert(m.sut.stateData.commandQue === List(CommandQueEntity(command, 100L + command.req.entries.length)))
+    }
+
+    "respond computed result" in {
+      val m = new MockedRaftActor(heartbeatIntervalMS = 1000)
+      val sender = TestProbe()
+      val state = RaftState.empty.copy(
+        currentTerm = 10L,
+        nextIndex = m.nodes.map(n => (n.id, 0L)).toMap,
+        commandQue = List(
+          CommandQueEntity(sample[ClientCommand].copy(sender = sender.ref), 1L),
+          CommandQueEntity(sample[ClientCommand].copy(sender = sender.ref), 2L),
+          CommandQueEntity(sample[ClientCommand].copy(sender = sender.ref), 3L),
+          CommandQueEntity(sample[ClientCommand].copy(sender = sender.ref), 4L),
+          CommandQueEntity(sample[ClientCommand].copy(sender = sender.ref), 5L),
+        )
+      )
+      when(m.logRepo.lastLogIndex()).thenReturn(100L)
+      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq())
+      m.sut.setState(Leader, state, 10 millisecond)
+
+      val res = sample[ApplyResult[TestComputed]].copy(index = 3L)
+      m.sut ! res
+
+      sender.expectMsg(ClientSuccess(state.commandQue(0).command.id, ClientCommandResponse(Some(res.toAny))))
+      sender.expectMsg(ClientSuccess(state.commandQue(1).command.id, ClientCommandResponse(Some(res.toAny))))
+      sender.expectMsg(ClientSuccess(state.commandQue(2).command.id, ClientCommandResponse(Some(res.toAny))))
+      assert(m.sut.stateData.commandQue === state.commandQue.drop(3))
     }
   }
 }

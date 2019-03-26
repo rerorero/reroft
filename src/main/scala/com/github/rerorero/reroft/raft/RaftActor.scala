@@ -65,7 +65,7 @@ case class ClientSuccess(id: String, res: ClientCommandResponse) extends ClientR
 case class ClientRedirect(leader: NodeID) extends ClientResponse
 case class ClientFailure(id: String, e: Throwable) extends ClientResponse
 
-class RaftActor[Entry <: GeneratedMessage with Message[Entry]](
+class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: GeneratedMessage with Message[Computed]](
   val stateMachine: ActorRef,
   val logRepo: LogRepository[Entry],
   val clusterNodes: Set[Node],
@@ -73,7 +73,7 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry]](
   val minElectionTimeoutMS: Int = 150,
   val maxElectionTimeoutMS: Int = 300,
   val heartbeatIntervalMS: Int = 15,
-)(implicit messageCompanion: GeneratedMessageCompanion[Entry]) extends LoggingFSM[Role, RaftState] {
+)(implicit cmpEntry: GeneratedMessageCompanion[Entry]) extends LoggingFSM[Role, RaftState] {
   implicit val executionContext: ExecutionContext = context.system.dispatcher
 
   private[this] val otherNodes = clusterNodes.filter(_.id != myID)
@@ -477,12 +477,12 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry]](
         // record the command with index so that sender of command (gRPC server) can wait corresponding response of the request asynchronously
         commandQue = CommandQueEntity(command, newLastIndex) :: state.commandQue
       )
-    case Event(ApplyResult(computed, index), state) =>
+    case Event(result: ApplyResult[Computed], state) => // TODO: type erasure
       // takes out a command that apply has completed and returns the result to the caller
-      val (done, notYet) = state.commandQue.partition(_.lastLogIndex <= index)
+      val (done, notYet) = state.commandQue.partition(_.lastLogIndex <= result.index)
       done.foreach { c =>
-        // this is not precise because delayed responses of request also have latest computed results
-        c.command.sender ! ClientSuccess(c.command.id, ClientCommandResponse(Some(computed)))
+        // this is not precise, delayed responses of request also have latest computed results
+        c.command.sender ! ClientSuccess(c.command.id, ClientCommandResponse(Some(result.toAny)))
       }
       stay using state.copy(commandQue = notYet)
   }
@@ -505,6 +505,8 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry]](
 }
 
 object RaftActor {
-  def props[Entry <: GeneratedMessage with Message[Entry]](stateMachine: ActorRef, log: LogRepository[Entry], nodes: Set[Node], me: NodeID)(implicit messageCompanion: GeneratedMessageCompanion[Entry]) =
-    Props(new RaftActor(stateMachine, log, nodes, me))
+  def props[Entry <: GeneratedMessage with Message[Entry], Computed <: GeneratedMessage with Message[Computed]](
+    stateMachine: ActorRef, log: LogRepository[Entry], nodes: Set[Node], me: NodeID
+  )(implicit cmpEntry: GeneratedMessageCompanion[Entry]) =
+    Props(new RaftActor[Entry, Computed](stateMachine, log, nodes, me))
 }

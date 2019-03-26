@@ -8,3 +8,7 @@ package com.github.rerorero.reroft.test;
 message TestEntry {
     string value = 1;
 }
+
+message TestComputed {
+    string value = 1;
+}

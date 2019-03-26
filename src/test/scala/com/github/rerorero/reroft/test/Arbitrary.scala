@@ -1,6 +1,7 @@
 package com.github.rerorero.reroft.test
 
 import com.github.rerorero.reroft._
+import com.github.rerorero.reroft.fsm.ApplyResult
 import com.github.rerorero.reroft.log.LogRepository
 import com.github.rerorero.reroft.raft._
 import com.google.common.net.HostAndPort
@@ -48,7 +49,7 @@ trait ArbitrarySet {
     Gen.const(m)
   }
 
-  implicit val arbLogRespotiry: Arbitrary[LogRepository[TestEntry]] = Arbitrary {
+  implicit val arbLogRepositry: Arbitrary[LogRepository[TestEntry]] = Arbitrary {
     val m = mock(classOf[LogRepository[TestEntry]])
     Gen.const(m)
   }
@@ -77,4 +78,12 @@ trait ArbitrarySet {
   implicit val arbRaftState: Arbitrary[RaftState] = Arbitrary(Gen.resultOf(RaftState.apply _))
 
   implicit val arbTestEntry: Arbitrary[TestEntry] = Arbitrary(Gen.alphaStr.map(s => TestEntry(s)))
+  implicit val arbTestComputed: Arbitrary[TestComputed] = Arbitrary(Gen.alphaStr.map(TestComputed.apply))
+
+  implicit val arbApplyResult: Arbitrary[ApplyResult[TestComputed]] = Arbitrary {
+    for {
+      computed <- arbTestComputed.arbitrary
+      index <- Gen.choose(0, 100000)
+    } yield ApplyResult(computed, index)
+  }
 }

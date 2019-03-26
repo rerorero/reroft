@@ -9,7 +9,7 @@ case class LogRepoEntry[Entry <: GeneratedMessage with Message[Entry]](
   index: Long,
   entry: Entry
 ) {
-  def toMessage: LogEntry = LogEntry(term, index, Some(Any.pack[Entry](entry)))
+  lazy val toMessage: LogEntry = LogEntry(term, index, Some(Any.pack[Entry](entry)))
 }
 
 object LogRepoEntry {

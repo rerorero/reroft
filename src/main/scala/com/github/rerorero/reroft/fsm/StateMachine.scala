@@ -1,24 +1,28 @@
 package com.github.rerorero.reroft.fsm
 
-import akka.actor.{Actor, ActorLogging, Props}
+import com.google.protobuf.any.Any
+import scalapb.{GeneratedMessage, GeneratedMessageCompanion, Message}
 
 case class Apply(index: Long)
 case object Initialize
-// TODO: typed result and StateMachine
-case class ApplyResult(computed: com.google.protobuf.any.Any, index: Long)
-
-class StateMachine extends Actor with ActorLogging {
-  override def receive: Receive = {
-    case Apply(index) =>
-      // TODO: implement my application
-      log.info(s"apply async until ${index}")
-      sender ! ApplyResult(null, index)
-    case Initialize =>
-      log.info(s"initialize")
-  }
+case class ApplyResult[Computed <: GeneratedMessage with Message[Computed]](computed: Computed, index: Long) {
+  lazy val toAny: Any = Any.pack(computed)
 }
 
-object StateMachine {
-  def props() = Props(new StateMachine)
+object ApplyResult {
+  def fromAny[Computed <: GeneratedMessage with Message[Computed]](any: Any, index: Long)(implicit com: GeneratedMessageCompanion[Computed]): ApplyResult[Computed] =
+    ApplyResult(any.unpack[Computed], index)
 }
+
+// You can create your application on top of state machine actor like this
+//
+// class StateMachine[Computed <: GeneratedMessage with Message[Computed]] extends Actor with ActorLogging {
+//   override def receive: Receive = {
+//     case Apply(index) =>
+//       log.info(s"apply logs until specified index and respond computed result to sender")
+//       sender ! ApplyResult[Computed](<result>, index)
+//     case Initialize =>
+//       log.info(s"initialize this actor here")
+//   }
+// }
 
