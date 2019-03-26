@@ -175,6 +175,36 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
     }
   }
 
+  // 1. Reply false if term < currentTerm (§5.1)
+  // 2. If votedFor is null or candidateId, and candidate’s log is at
+  //    least as up-to-date as receiver’s log, grant vote (§5.2, §5.4)
+  def handleVoteRequest(req: RequestVoteRequest, state: RaftState): (RequestVoteResponse, RaftState) =
+    if (req.term < state.currentTerm) {
+      log.info(s"[${stateName}] reject ${req.candidateId} due to stale term")
+      (RequestVoteResponse(state.currentTerm, voteGranted = false), state)
+
+    } else {
+      var newState = state
+      if (req.term > state.currentTerm) {
+        log.info(s"[${stateName}] discover new term from ${req.candidateId} term=${req.term} current=${state.currentTerm}")
+        newState = newState.copy(currentTerm = req.term)
+      }
+
+      if (state.votedFor.map(_.toString() != req.candidateId).getOrElse(false)) {
+        log.info(s"[${stateName}] reject ${req.candidateId} because I've already voted ${state.votedFor}")
+        (RequestVoteResponse(state.currentTerm, voteGranted = false), newState)
+
+      } else if (req.lastLogIndex < logRepo.lastLogIndex() || req.lastLogTerm < logRepo.lastLogTerm()) {
+        log.info(s"[${stateName}] reject ${req.candidateId} dee to stale log")
+        (RequestVoteResponse(state.currentTerm, voteGranted = false), newState)
+
+      } else {
+        log.info(s"[${stateName}] vote from ${req.candidateId} has accepted")
+        (RequestVoteResponse(state.currentTerm, voteGranted = true), newState.copy(votedFor = Some(NodeID.of(req.candidateId))))
+      }
+    }
+
+
   startWith(Follower, RaftState.empty)
 
   //-----------------------
@@ -193,35 +223,10 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
       log.info(s"[Candidate] election ${newTerm} started!")
       stay using state.clearElectionState.copy(currentTerm = newTerm)
 
-    // 1. Reply false if term < currentTerm (§5.1)
-    // 2. If votedFor is null or candidateId, and candidate’s log is at
-    //    least as up-to-date as receiver’s log, grant vote (§5.2, §5.4)
-    case Event(req: RequestVoteRequest, state) if req.term < state.currentTerm =>
-      log.info(s"[Candidate] reject ${req.candidateId} due to stale term")
-      sender ! RequestVoteResponse(state.currentTerm, voteGranted = false)
-      stay
     case Event(req: RequestVoteRequest, state) =>
-      var newState = state
-      if (req.term > state.currentTerm) {
-        log.info(s"[Candidate] discover new term from ${req.candidateId} term=${req.term} current=${state.currentTerm}")
-        newState = newState.copy(currentTerm = req.term)
-      }
-
-      if (state.votedFor.map(_.toString() != req.candidateId).getOrElse(false)) {
-        log.info(s"[Candidate] reject ${req.candidateId} because I've already voted ${state.votedFor}")
-        sender ! RequestVoteResponse(state.currentTerm, voteGranted = false)
-        stay using newState
-
-      } else if (req.lastLogIndex < logRepo.lastLogIndex() || req.lastLogTerm < logRepo.lastLogTerm()) {
-        log.info(s"[Candidate] reject ${req.candidateId} dee to stale log")
-        sender ! RequestVoteResponse(state.currentTerm, voteGranted = false)
-        stay using newState
-
-      } else {
-        log.info(s"[Candidate] vote from ${req.candidateId} has accepted")
-        sender ! RequestVoteResponse(state.currentTerm, voteGranted = true)
-        stay using newState.copy(votedFor = Some(NodeID.of(req.candidateId)))
-      }
+      val (res, newState) = handleVoteRequest(req, state)
+      sender ! res
+      stay using newState
 
     // *************
     // VOTE RESPONSE
@@ -241,7 +246,7 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
       if (isMajority(newState.granted.size)) {
         log.info(s"[Candidate] granted by majority, you win!")
         val lastLogIndex = logRepo.lastLogIndex()
-        newState = newState.copy(
+        newState = newState.clearElectionState.copy(
           leaderID = Some(myID),
           nextIndex = otherNodes.map(n => (n.id, lastLogIndex + 1)).toMap, // (initialized to leader last log index + 1
           matchIndex = None,
@@ -271,7 +276,9 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
       log.info(s"[Candidate] discover new leader's request ${req.leaderID}")
       val (res, newState) = handleAppendLogRequest(req, state.copy(
         currentTerm = req.term,
-        leaderID = Some(NodeID.of(req.leaderID))
+        leaderID = Some(NodeID.of(req.leaderID)),
+        votedFor = None,
+        granted = Set.empty,
       ))
       sender ! res
       goto(Follower) using newState
@@ -296,6 +303,14 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
   //  FOLLOWER
   //-----------------------
   when(Follower) {
+    // *************
+    // VOTE REQUEST
+    // *************
+    case Event(req: RequestVoteRequest, state) =>
+      val (res, newState) = handleVoteRequest(req, state)
+      sender ! res
+      stay using newState
+
     // *************
     // ELECTION TIMEOUT
     // *************
@@ -333,6 +348,18 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
   //  LEADER
   //-----------------------
   when(Leader) {
+    // *************
+    // VOTE REQUEST
+    // *************
+    case Event(req: RequestVoteRequest, state) =>
+      val currentTerm = state.currentTerm
+      val (res, newState) = handleVoteRequest(req, state)
+      sender ! res
+      if (currentTerm != newState.currentTerm || newState.votedFor.nonEmpty)
+        goto(Follower) using newState // detected new election or new term
+      else
+        stay using newState
+
     // *************
     // HEARTBEAT INTERVAL or START APPEND LOG
     // *************

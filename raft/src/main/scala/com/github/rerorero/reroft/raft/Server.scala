@@ -2,15 +2,15 @@ package com.github.rerorero.reroft.raft
 
 import akka.actor.{ActorRef, ActorSystem}
 import akka.http.scaladsl.Http
+import akka.pattern.ask
 import akka.stream.{ActorMaterializer, Materializer}
+import akka.util.Timeout
 import com.github.rerorero.reroft._
 import com.google.common.net.HostAndPort
-import akka.pattern.ask
-import akka.util.Timeout
 import io.grpc.{Status, StatusRuntimeException}
 
-import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
+import scala.concurrent.{ExecutionContext, Future}
 
 case class ServerConfig(
   clusterNodes: Set[HostAndPort],
