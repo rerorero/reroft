@@ -1,4 +1,4 @@
-package com.github.rerorero.reroft.grpc
+package com.github.rerorero.reroft.raft
 
 import akka.actor.{ActorRef, ActorSystem}
 import akka.http.scaladsl.Http
@@ -26,6 +26,7 @@ class Server(system: ActorSystem, config: ServerConfig) {
 //      config.clusterNodes.map(Node.fromAddress),
 //      NodeID(config.me))
 //    )
+
 
     Http().bindAndHandleAsync(
       RaftServiceHandler(new RaftServiceImpl(null)),

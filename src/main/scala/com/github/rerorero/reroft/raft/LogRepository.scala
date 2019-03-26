@@ -1,4 +1,5 @@
-package com.github.rerorero.reroft.log
+package com.github.rerorero.reroft.raft
+
 import com.github.rerorero.reroft.LogEntry
 import com.github.rerorero.reroft.test.TestEntry
 import com.google.protobuf.any.Any

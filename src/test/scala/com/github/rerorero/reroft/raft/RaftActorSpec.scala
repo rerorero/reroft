@@ -4,7 +4,6 @@ import akka.actor.ActorSystem
 import akka.stream.{ActorMaterializer, Materializer}
 import akka.testkit.{ImplicitSender, TestFSMRef, TestKit, TestProbe}
 import com.github.rerorero.reroft.fsm.{Apply, ApplyResult, Initialize}
-import com.github.rerorero.reroft.log.{LogRepoEntry, LogRepository}
 import com.github.rerorero.reroft.test.{TestComputed, TestEntry, TestUtil}
 import com.github.rerorero.reroft._
 import org.mockito.ArgumentMatchers._
