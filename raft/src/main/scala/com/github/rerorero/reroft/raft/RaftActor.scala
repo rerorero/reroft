@@ -57,12 +57,12 @@ case object Leader extends Role
 case object ElectionTimeout
 case object StartElection
 case object BroadcastAppendLog
-case class ClientCommand(id: String, req: ClientCommandRequest, sender: ActorRef)
+case class ClientCommand(req: ClientCommandRequest, sender: ActorRef)
 
 sealed trait ClientResponse
-case class ClientSuccess(id: String, res: ClientCommandResponse) extends ClientResponse
+case class ClientSuccess(res: ClientCommandResponse) extends ClientResponse
 case class ClientRedirect(leader: NodeID) extends ClientResponse
-case class ClientFailure(id: String, e: Throwable) extends ClientResponse
+case class ClientFailure(e: Throwable) extends ClientResponse
 
 class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: GeneratedMessage with Message[Computed]](
   val stateMachine: ActorRef,
@@ -112,7 +112,7 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
   def isMajority(n: Int) = n > (clusterNodes.size/2.0)
 
   def flushClientCommandQueue(que: Seq[CommandQueEntity]): Unit = que.foreach { c =>
-    c.command.sender ! ClientFailure(c.command.id, new Exception("request is out of date"))
+    c.command.sender ! ClientFailure(new Exception("request is out of date"))
   }
 
   def handleAppendLogRequest(req: AppendEntriesRequest, state: RaftState): (AppendEntriesResponse, RaftState) = {
@@ -370,7 +370,7 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
 
         if (res.term > state.currentTerm) {
           log.info(s"[Leader] detect new term from ${nodeID}")
-          state.commandQue.foreach(c => c.command.sender ! ClientFailure(c.command.id, new Exception("detected new term, request is now out of date")))
+          state.commandQue.foreach(c => c.command.sender ! ClientFailure(new Exception("detected new term, request is now out of date")))
           goto(Follower) using state.copy(
             leaderID = None,
             commandQue = List.empty,
@@ -444,7 +444,7 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
       log.info(s"[Leader] discover new leader's request ${req.leaderID}")
       val (res, newState) = handleAppendLogRequest(req, state)
       sender ! res
-      state.commandQue.foreach(c => c.command.sender ! ClientFailure(c.command.id, new Exception("detected new leader, request is now out of date")))
+      state.commandQue.foreach(c => c.command.sender ! ClientFailure(new Exception("detected new leader, request is now out of date")))
       goto(Follower) using newState.copy(
         leaderID = Some(NodeID.of(req.leaderID)),
         commandQue = List.empty,
@@ -481,7 +481,7 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
       val (done, notYet) = state.commandQue.partition(_.lastLogIndex <= result.index)
       done.foreach { c =>
         // this is not precise, delayed responses of request also have latest computed results
-        c.command.sender ! ClientSuccess(c.command.id, ClientCommandResponse(Some(result.toAny)))
+        c.command.sender ! ClientSuccess(ClientCommandResponse(Some(result.toAny)))
       }
       stay using state.copy(commandQue = notYet)
   }

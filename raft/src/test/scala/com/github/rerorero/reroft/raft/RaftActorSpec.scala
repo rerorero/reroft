@@ -534,9 +534,9 @@ class RaftActorSpec
       val res = sample[ApplyResult[TestComputed]].copy(index = 3L)
       m.sut ! res
 
-      sender.expectMsg(ClientSuccess(state.commandQue(0).command.id, ClientCommandResponse(Some(res.toAny))))
-      sender.expectMsg(ClientSuccess(state.commandQue(1).command.id, ClientCommandResponse(Some(res.toAny))))
-      sender.expectMsg(ClientSuccess(state.commandQue(2).command.id, ClientCommandResponse(Some(res.toAny))))
+      sender.expectMsg(ClientSuccess(ClientCommandResponse(Some(res.toAny))))
+      sender.expectMsg(ClientSuccess(ClientCommandResponse(Some(res.toAny))))
+      sender.expectMsg(ClientSuccess(ClientCommandResponse(Some(res.toAny))))
       assert(m.sut.stateData.commandQue === state.commandQue.drop(3))
     }
   }

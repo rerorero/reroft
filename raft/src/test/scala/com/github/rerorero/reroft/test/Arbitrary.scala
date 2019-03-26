@@ -71,7 +71,7 @@ trait ArbitrarySet {
   def sampleEntryAsAny(): Any = Any.pack(sample[TestEntry])
 
   implicit val arbClientCommand: Arbitrary[ClientCommand] = Arbitrary {
-    arbClientCommandRequest.arbitrary.map(ClientCommand(java.util.UUID.randomUUID().toString, _, null))
+    arbClientCommandRequest.arbitrary.map(ClientCommand(_, null))
   }
   implicit val arbCommandQueEntity: Arbitrary[CommandQueEntity] = Arbitrary(Gen.resultOf(CommandQueEntity.apply _))
   implicit val arbRaftState: Arbitrary[RaftState] = Arbitrary(Gen.resultOf(RaftState.apply _))
