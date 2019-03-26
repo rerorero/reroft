@@ -3,7 +3,7 @@ package com.github.rerorero.reroft.raft
 import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props}
 import akka.grpc.GrpcClientSettings
 import akka.stream.Materializer
-import com.github.rerorero.reroft._
+import com.github.rerorero.reroft.grpc._
 import com.google.common.net.HostAndPort
 
 import scala.concurrent.ExecutionContext

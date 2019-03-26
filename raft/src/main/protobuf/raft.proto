@@ -3,10 +3,9 @@ syntax = "proto3";
 import "google/protobuf/any.proto";
 
 option java_multiple_files = true;
-option java_package = "com.github.rerorero.reroft";
-option java_outer_classname = "RaftProto";
+option java_package = "com.github.rerorero.reroft.grpc";
 
-package com.github.rerorero.reroft;
+package com.github.rerorero.reroft.grpc;
 
 message LogEntry {
     int64 term = 1;

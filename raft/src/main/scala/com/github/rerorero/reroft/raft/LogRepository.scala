@@ -1,7 +1,6 @@
 package com.github.rerorero.reroft.raft
 
-import com.github.rerorero.reroft.LogEntry
-import com.github.rerorero.reroft.test.TestEntry
+import com.github.rerorero.reroft.grpc.LogEntry
 import com.google.protobuf.any.Any
 import scalapb.{GeneratedMessage, GeneratedMessageCompanion, Message}
 
@@ -34,15 +33,3 @@ trait LogRepository[Entry <: GeneratedMessage with Message[Entry]] {
   def getLogs(fromIndex: Long): Seq[LogRepoEntry[Entry]]
 }
 
-// TODO: remove
-object logRepositoryDummy extends LogRepository[TestEntry] {
-  override def getCommitIndex(): Long = ???
-  override def contains(term: Long, index: Long): Boolean = ???
-  override def removeConflicted(term: Long, index: Long): Unit = ???
-  override def append(entries: Seq[LogRepoEntry[TestEntry]]): Unit = ???
-  override def commit(destIndex: Long): Unit = ???
-  override def lastLogTerm(): Long = ???
-  override def lastLogIndex(): Long = ???
-  override def empty(): Unit = ???
-  override def getLogs(fromIndex: Long): Seq[LogRepoEntry[TestEntry]] = ???
-}

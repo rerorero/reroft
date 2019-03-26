@@ -1,9 +1,9 @@
 syntax = "proto3";
 
 option java_multiple_files = true;
-option java_package = "com.github.rerorero.reroft.test";
+option java_package = "com.github.rerorero.reroft.grpc.test";
 
-package com.github.rerorero.reroft.test;
+package com.github.rerorero.reroft.grpc.test;
 
 message TestEntry {
     string value = 1;

@@ -1,7 +1,8 @@
 package com.github.rerorero.reroft.test
 
-import com.github.rerorero.reroft._
 import com.github.rerorero.reroft.fsm.ApplyResult
+import com.github.rerorero.reroft.grpc._
+import com.github.rerorero.reroft.grpc.test.{TestComputed, TestEntry}
 import com.github.rerorero.reroft.raft.{LogRepository, _}
 import com.google.common.net.HostAndPort
 import com.google.protobuf.any.Any

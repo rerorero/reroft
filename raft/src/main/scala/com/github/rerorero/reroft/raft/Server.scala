@@ -5,36 +5,31 @@ import akka.http.scaladsl.Http
 import akka.pattern.ask
 import akka.stream.{ActorMaterializer, Materializer}
 import akka.util.Timeout
-import com.github.rerorero.reroft._
-import com.google.common.net.HostAndPort
+import com.github.rerorero.reroft.grpc._
 import io.grpc.{Status, StatusRuntimeException}
+import scalapb.{GeneratedMessage, GeneratedMessageCompanion, Message}
 
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
 
-case class ServerConfig(
-  clusterNodes: Set[HostAndPort],
-  me: HostAndPort
-)
-
-class Server(system: ActorSystem, config: ServerConfig) {
+class Server[Entry <: GeneratedMessage with Message[Entry], Computed <: GeneratedMessage with Message[Computed]](
+  system: ActorSystem, stateMachine: ActorRef, logRepository: LogRepository[Entry], config: RaftConfig
+)(implicit cmpEntry: GeneratedMessageCompanion[Entry]) {
   def run(port: Int): Future[Http.ServerBinding] = {
     implicit val sys: ActorSystem = system
     implicit val mat: Materializer = ActorMaterializer()
     implicit val ec: ExecutionContext = sys.dispatcher
 
-//    val stateMachine = null // TODO
-//    val raftFSM = sys.actorOf(RaftActor.props(
-//      stateMachine,
-//      logRepositoryDummy,// TODO: dummy should be replaced
-//      config.clusterNodes.map(Node.fromAddress),
-//      NodeID(config.me))
-//    )
-
+    val raftFSM = sys.actorOf(RaftActor.props(
+      stateMachine,
+      logRepository,
+      config.clusterNodes.map(Node.fromAddress),
+      NodeID(config.me))
+    )
 
     Http().bindAndHandleAsync(
-      RaftServiceHandler(new RaftServiceImpl(null)),
-      interface = "127.0.0.1",
+      RaftServiceHandler(new RaftServiceImpl(raftFSM)),
+      interface = "127.0.0.1", // TODO: to be configurable
       port = port
     )
   }

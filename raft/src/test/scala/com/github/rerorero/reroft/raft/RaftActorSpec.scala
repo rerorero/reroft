@@ -3,9 +3,10 @@ package com.github.rerorero.reroft.raft
 import akka.actor.ActorSystem
 import akka.stream.{ActorMaterializer, Materializer}
 import akka.testkit.{ImplicitSender, TestFSMRef, TestKit, TestProbe}
-import com.github.rerorero.reroft._
 import com.github.rerorero.reroft.fsm.{Apply, ApplyResult, Initialize}
-import com.github.rerorero.reroft.test.{TestComputed, TestEntry, TestUtil}
+import com.github.rerorero.reroft.grpc.test.{TestComputed, TestEntry}
+import com.github.rerorero.reroft.grpc.{AppendEntriesRequest, AppendEntriesResponse}
+import com.github.rerorero.reroft.test.TestUtil
 import org.mockito.ArgumentMatchers._
 import org.mockito.Mockito._
 import org.scalacheck.{Arbitrary, Gen}
