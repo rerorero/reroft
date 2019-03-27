@@ -3,6 +3,7 @@ package com.github.rerorero.reroft.raft
 import akka.actor.{ActorRef, Cancellable, LoggingFSM, Props}
 import com.github.rerorero.reroft.fsm.{Apply, ApplyResult, Initialize}
 import com.github.rerorero.reroft.grpc._
+import com.github.rerorero.reroft.logs.{LogRepoEntry, LogRepository}
 import scalapb.{GeneratedMessage, GeneratedMessageCompanion, Message}
 
 import scala.concurrent.ExecutionContext

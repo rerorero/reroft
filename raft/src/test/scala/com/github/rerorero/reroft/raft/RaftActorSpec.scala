@@ -4,8 +4,9 @@ import akka.actor.ActorSystem
 import akka.stream.{ActorMaterializer, Materializer}
 import akka.testkit.{ImplicitSender, TestFSMRef, TestKit, TestProbe}
 import com.github.rerorero.reroft.fsm.{Apply, ApplyResult, Initialize}
+import com.github.rerorero.reroft.grpc._
 import com.github.rerorero.reroft.grpc.test.{TestComputed, TestEntry}
-import com.github.rerorero.reroft.grpc.{AppendEntriesRequest, AppendEntriesResponse}
+import com.github.rerorero.reroft.logs.{LogRepoEntry, LogRepository}
 import com.github.rerorero.reroft.test.TestUtil
 import org.mockito.ArgumentMatchers._
 import org.mockito.Mockito._
@@ -69,7 +70,7 @@ class RaftActorSpec
   }
 
   "follower" should {
-    "start election when no append entries receives" in  {
+    "start election when it never receives append entries" in  {
       val timeout = 100
       val m = new MockedRaftActor(minElectionTimeoutMS = timeout, maxElectionTimeoutMS = timeout +1)
       m.sut.setState(Follower, RaftState.empty, 10 millisecond)
@@ -79,7 +80,7 @@ class RaftActorSpec
     }
 
     "reject AppendEntries when term is stale" in  {
-      val m = new MockedRaftActor()
+      val m = new MockedRaftActor(minElectionTimeoutMS = 1000, maxElectionTimeoutMS = 1001)
       val state = RaftState.empty.copy(currentTerm = 100L)
       m.sut.setState(Follower, state, 10 millisecond)
 
@@ -158,16 +159,16 @@ class RaftActorSpec
   "candidate" should {
     "start election" in {
       val nodes = nodesForTest(3)
-      val m = new MockedRaftActor(nodes = nodes.map(_._1).toSet, myID = nodes.head._1.id, minElectionTimeoutMS = 100, maxElectionTimeoutMS = 101)
+      val m = new MockedRaftActor(nodes = nodes.map(_._1).toSet, myID = nodes.head._1.id, minElectionTimeoutMS = 200, maxElectionTimeoutMS = 201)
       m.sut.setState(Follower, RaftState.empty.copy(currentTerm = 10L), 10 millisecond)
       when(m.logRepo.lastLogIndex()).thenReturn(234L)
       when(m.logRepo.lastLogTerm()).thenReturn(567L)
 
-      Thread.sleep(120)
+      Thread.sleep(300)
       assert(m.sut.stateName === Candidate)
 
       assert(m.sut.stateData.currentTerm === 11L)
-      nodes.head._2.expectNoMessage(300 millisecond)
+      nodes.head._2.expectNoMessage(100 millisecond)
       nodes.filter(_._1.id != m.myID).foreach(n => n._2.expectMsg(RequestVoteRequest(11L, m.myID.toString(), 234L, 567L)))
     }
 
@@ -278,7 +279,7 @@ class RaftActorSpec
 
     "restart election if timouted" in {
       val nodes = nodesForTest(3)
-      val timeout = 100
+      val timeout = 200
       val m = new MockedRaftActor(nodes = nodes.map(_._1).toSet, myID = nodes.head._1.id, minElectionTimeoutMS = timeout, maxElectionTimeoutMS = timeout+1)
       m.sut.setState(Candidate, RaftState.empty.copy(currentTerm = 10L), 10 millisecond)
       when(m.logRepo.lastLogIndex()).thenReturn(234L)
@@ -291,7 +292,7 @@ class RaftActorSpec
       assert(m.sut.stateData.granted === Set(NodeID.of("localhost:1234")))
 
       // timeout
-      Thread.sleep((timeout * 1.2).toInt)
+      Thread.sleep((timeout * 1.5).toInt)
       assert(m.sut.stateName === Candidate)
       assert(m.sut.stateData.granted === Set())
       // re-voted with incremented term
@@ -344,7 +345,7 @@ class RaftActorSpec
     "start appending log process" in {
       val nodes = nodesForTest(3)
       val myID = nodes.head._1.id
-      val m = new MockedRaftActor(nodes = nodes.map(_._1).toSet, myID, heartbeatIntervalMS = 1000)
+      val m = new MockedRaftActor(nodes = nodes.map(_._1).toSet, myID, heartbeatIntervalMS = 1000, minElectionTimeoutMS = 1000, maxElectionTimeoutMS = 1001)
       val state = RaftState.empty.copy(
         currentTerm = 10L,
         leaderID = Some(myID),
@@ -529,6 +530,7 @@ class RaftActorSpec
         )
       )
       when(m.logRepo.lastLogIndex()).thenReturn(100L)
+      when(m.logRepo.lastLogTerm()).thenReturn(2L)
       when(m.logRepo.getLogs(any[Long])).thenReturn(Seq())
       m.sut.setState(Leader, state, 10 millisecond)
 

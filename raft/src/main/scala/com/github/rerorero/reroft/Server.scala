@@ -1,4 +1,4 @@
-package com.github.rerorero.reroft.raft
+package com.github.rerorero.reroft
 
 import akka.actor.{ActorRef, ActorSystem}
 import akka.http.scaladsl.Http
@@ -6,6 +6,8 @@ import akka.pattern.ask
 import akka.stream.{ActorMaterializer, Materializer}
 import akka.util.Timeout
 import com.github.rerorero.reroft.grpc._
+import com.github.rerorero.reroft.logs.LogRepository
+import com.github.rerorero.reroft.raft._
 import io.grpc.{Status, StatusRuntimeException}
 import scalapb.{GeneratedMessage, GeneratedMessageCompanion, Message}
 

@@ -4,21 +4,28 @@ import akka.actor.{ActorRef, ActorSystem}
 import akka.grpc.GrpcClientSettings
 import akka.http.scaladsl.Http
 import akka.stream.{ActorMaterializer, Materializer}
-import com.github.rerorero.reroft.grpc.{RaftService, RaftServiceClient}
-import com.github.rerorero.reroft.raft.{LogRepository, NodeID, RaftConfig, Server}
+import com.github.rerorero.reroft.grpc.{ClientCommandRequest, ClientCommandResponse, RaftServiceClient}
+import com.github.rerorero.reroft.logs.LogRepository
+import com.github.rerorero.reroft.raft.RaftConfig
 import com.google.common.net.HostAndPort
+import com.google.protobuf.any.Any
 import com.typesafe.config.ConfigFactory
+import io.grpc.{Status, StatusRuntimeException}
 import scalapb.{GeneratedMessage, GeneratedMessageCompanion, Message}
 
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util.Random
 
 abstract class Agent[Entry <: GeneratedMessage with Message[Entry], Computed <: GeneratedMessage with Message[Computed]] {
   def logRepository: LogRepository[Entry]
   def config: RaftConfig
   def stateMachine: ActorRef
-  implicit def  cmpEntry: GeneratedMessageCompanion[Entry]
+  implicit def cmpEntry: GeneratedMessageCompanion[Entry]
+  implicit def cmpComputed: GeneratedMessageCompanion[Computed]
 
-  implicit val system = ActorSystem("reroft", ConfigFactory.parseString("akka.http.server.preview.enable-http2 = on")
+  implicit val system = ActorSystem(
+    "reroft",
+    ConfigFactory.parseString("akka.http.server.preview.enable-http2 = on") // TODO: to be configurable
     .withFallback(ConfigFactory.defaultApplication())
   )
   implicit val mat: Materializer = ActorMaterializer()
@@ -26,20 +33,26 @@ abstract class Agent[Entry <: GeneratedMessage with Message[Entry], Computed <: 
 
   private[this] val clientMap = collection.mutable.Map.empty[HostAndPort, RaftServiceClient]
   def getCLient(hostAndPort: HostAndPort): RaftServiceClient = synchronized {
-    if (!clientMap.contains(hostAndPort)) {
-      val c = RaftServiceClient(
+    clientMap.getOrElseUpdate(hostAndPort, RaftServiceClient(
         GrpcClientSettings.connectToServiceAt(hostAndPort.getHost, hostAndPort.getPort)
           .withTls(false)
-      )
-      clientMap(hostAndPort) = c
-    }
-    clientMap(hostAndPort)
+    ))
   }
 
   def runServer(): Future[Http.ServerBinding] =
     new Server[Entry, Computed](system, stateMachine, logRepository, config).run(config.me.getPort)
 
   def runClientCommand(command: Seq[Entry]): Future[Computed] = {
-    ???
+    val client = Random.shuffle(config.clusterNodes).head
+    val req = ClientCommandRequest(command.map(Any.pack[Entry]))
+    getCLient(client).clientCommand(req).recoverWith {
+      case e: StatusRuntimeException if e.getStatus.getCode == Status.FAILED_PRECONDITION.getCode =>
+        // redirect to leader
+        getCLient(HostAndPort.fromString(e.getStatus.getDescription)).clientCommand(req)
+      case e: Throwable => Future.failed(e)
+    } flatMap {
+      case ClientCommandResponse(Some(computed)) => Future(computed.unpack[Computed])
+      case ClientCommandResponse(None) => Future.failed(new Exception("node responds None"))
+    }
   }
 }
