@@ -15,7 +15,6 @@ import com.github.rerorero.reroft.test.TestUtil
 import com.google.common.net.HostAndPort
 import com.google.protobuf.any.Any
 import com.typesafe.config.ConfigFactory
-import io.grpc.{Status, StatusRuntimeException}
 import org.mockito.ArgumentMatchers._
 import org.mockito.Mockito._
 import org.scalatest.concurrent.ScalaFutures
