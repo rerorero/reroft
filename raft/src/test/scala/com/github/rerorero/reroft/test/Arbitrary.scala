@@ -71,6 +71,9 @@ trait ArbitrarySet {
     }
   }
   def sampleEntryAsAny(): Any = Any.pack(sample[TestEntry])
+  implicit val arbClientCommandResponse: Arbitrary[ClientCommandResponse] = Arbitrary {
+    arbTestComputed.arbitrary.map(c => ClientCommandResponse(Some(Any.pack(c))))
+  }
 
   implicit val arbClientCommand: Arbitrary[ClientCommand] = Arbitrary {
     arbClientCommandRequest.arbitrary.map(ClientCommand(_, null))

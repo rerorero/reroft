@@ -62,7 +62,6 @@ case class ClientCommand(req: ClientCommandRequest, sender: ActorRef)
 
 sealed trait ClientResponse
 case class ClientSuccess(res: ClientCommandResponse) extends ClientResponse
-case class ClientRedirect(leader: NodeID) extends ClientResponse
 case class ClientFailure(e: Throwable) extends ClientResponse
 
 class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: GeneratedMessage with Message[Computed]](
@@ -335,7 +334,7 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
     case Event(command: ClientCommand, state) =>
       log.info(s"[follower] receives client command")
       state.leaderID match {
-        case Some(leader) => command.sender ! ClientRedirect(leader)
+        case Some(leader) => command.sender ! ClientSuccess(ClientCommandResponse(None, leader.toString()))
         case None =>
           // TODO: handle timeout or limit the number of retries
           context.system.scheduler.scheduleOnce(heartbeatIntervalMS.millis, self, command)

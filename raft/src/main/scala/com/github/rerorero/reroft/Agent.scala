@@ -18,24 +18,29 @@ import scala.util.Random
 
 abstract class Agent[Entry <: GeneratedMessage with Message[Entry], Computed <: GeneratedMessage with Message[Computed]] {
   def logRepository: LogRepository[Entry]
+
   def config: RaftConfig
+
   def stateMachine: ActorRef
+
   implicit def cmpEntry: GeneratedMessageCompanion[Entry]
+
   implicit def cmpComputed: GeneratedMessageCompanion[Computed]
 
   implicit val system = ActorSystem(
     "reroft",
-    ConfigFactory.parseString("akka.http.server.preview.enable-http2 = on") // TODO: to be configurable
-    .withFallback(ConfigFactory.defaultApplication())
+    ConfigFactory.parseString("akka.http.server.preview.enable-http2 = on")
+      .withFallback(ConfigFactory.defaultApplication())
   )
   implicit val mat: Materializer = ActorMaterializer()
   implicit val ec: ExecutionContext = system.dispatcher
 
   private[this] val clientMap = collection.mutable.Map.empty[HostAndPort, RaftServiceClient]
+
   def getCLient(hostAndPort: HostAndPort): RaftServiceClient = synchronized {
     clientMap.getOrElseUpdate(hostAndPort, RaftServiceClient(
-        GrpcClientSettings.connectToServiceAt(hostAndPort.getHost, hostAndPort.getPort)
-          .withTls(false)
+      GrpcClientSettings.connectToServiceAt(hostAndPort.getHost, hostAndPort.getPort)
+        .withTls(false)
     ))
   }
 
@@ -45,14 +50,11 @@ abstract class Agent[Entry <: GeneratedMessage with Message[Entry], Computed <: 
   def runClientCommand(command: Seq[Entry]): Future[Computed] = {
     val client = Random.shuffle(config.clusterNodes).head
     val req = ClientCommandRequest(command.map(Any.pack[Entry]))
-    getCLient(client).clientCommand(req).recoverWith {
-      case e: StatusRuntimeException if e.getStatus.getCode == Status.FAILED_PRECONDITION.getCode =>
-        // redirect to leader
-        getCLient(HostAndPort.fromString(e.getStatus.getDescription)).clientCommand(req)
-      case e: Throwable => Future.failed(e)
-    } flatMap {
-      case ClientCommandResponse(Some(computed)) => Future(computed.unpack[Computed])
-      case ClientCommandResponse(None) => Future.failed(new Exception("node responds None"))
+    getCLient(client).clientCommand(req).flatMap {
+      case ClientCommandResponse(Some(computed), _) =>
+        Future.successful(computed.unpack[Computed])
+      case ClientCommandResponse(None, redirectTo) =>
+        getCLient(HostAndPort.fromString(redirectTo)).clientCommand(req).map(_.computed.get.unpack[Computed])
     }
   }
 }

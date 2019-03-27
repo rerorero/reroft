@@ -68,4 +68,5 @@ message ClientCommandRequest {
 
 message ClientCommandResponse {
     google.protobuf.Any computed = 1;
+    string redirectTo = 2;
 }

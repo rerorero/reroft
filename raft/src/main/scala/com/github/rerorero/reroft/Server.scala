@@ -1,14 +1,14 @@
 package com.github.rerorero.reroft
 
 import akka.actor.{ActorRef, ActorSystem}
-import akka.http.scaladsl.Http
+import akka.http.scaladsl.UseHttp2.Always
+import akka.http.scaladsl.{Http, HttpConnectionContext}
 import akka.pattern.ask
 import akka.stream.{ActorMaterializer, Materializer}
 import akka.util.Timeout
 import com.github.rerorero.reroft.grpc._
 import com.github.rerorero.reroft.logs.LogRepository
 import com.github.rerorero.reroft.raft._
-import io.grpc.{Status, StatusRuntimeException}
 import scalapb.{GeneratedMessage, GeneratedMessageCompanion, Message}
 
 import scala.concurrent.duration._
@@ -32,7 +32,8 @@ class Server[Entry <: GeneratedMessage with Message[Entry], Computed <: Generate
     Http().bindAndHandleAsync(
       RaftServiceHandler(new RaftServiceImpl(raftFSM)),
       interface = "127.0.0.1", // TODO: to be configurable
-      port = port
+      port = port,
+      connectionContext = HttpConnectionContext(http2 = Always)
     )
   }
 }
@@ -49,7 +50,6 @@ class RaftServiceImpl(raftFSM: ActorRef)(implicit ec: ExecutionContext) extends 
   override def clientCommand(in: ClientCommandRequest): Future[ClientCommandResponse] =
     (raftFSM ? in).mapTo[ClientResponse].flatMap{
       case ClientSuccess(res) => Future.successful(res)
-      case ClientRedirect(leader: NodeID) => Future.failed(new StatusRuntimeException(Status.FAILED_PRECONDITION.withDescription(leader.toString())))
       case ClientFailure(e: Throwable) => Future.failed(e)
     }
 }

@@ -7,6 +7,7 @@ import com.github.rerorero.reroft.fsm.{Apply, ApplyResult, Initialize}
 import com.github.rerorero.reroft.grpc._
 import com.github.rerorero.reroft.grpc.test.{TestComputed, TestEntry}
 import com.github.rerorero.reroft.logs.{LogRepoEntry, LogRepository}
+import com.github.rerorero.reroft.raft
 import com.github.rerorero.reroft.test.TestUtil
 import org.mockito.ArgumentMatchers._
 import org.mockito.Mockito._
@@ -337,7 +338,7 @@ class RaftActorSpec
       expectMsg(AppendEntriesResponse(30L, true))
       assert(m.sut.stateName === Follower)
       assert(m.sut.stateData.leaderID === Some(NodeID.of("localhost:2222")))
-      probe.expectMsg(ClientRedirect(NodeID.of("localhost:2222")))
+      probe.expectMsg(raft.ClientSuccess(ClientCommandResponse(None, "localhost:2222")))
     }
   }
 
