@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "com.github.rerorero.reroft.grpc.calc";
+
+package com.github.rerorero.reroft.grpc.calc;
+
+enum Command {
+    COMMAND_UNKNOWN = 0;
+    ADD = 1;
+    SUB = 2;
+    MULTI = 3;
+    DIV = 4;
+}
+
+message CalcCommand {
+    Command command = 1;
+    double  cdr = 2;
+}
+
+message CalcResult {
+    string value = 1;
+}

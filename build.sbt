@@ -33,16 +33,16 @@ lazy val raft = (project in file("raft"))
   )
   .enablePlugins(AkkaGrpcPlugin)
 
-lazy val appKvs = (project in file("app_kvs"))
+lazy val appCalc = (project in file("app_calc"))
   .settings(
     commonSettings,
-    name := "kvs",
+    name := "calc",
     version := "0.1.0",
-    mainClass in assembly := Some("com.github.rerorero.reroft.kvs.Main"),
+    mainClass in assembly := Some("com.github.rerorero.reroft.calc.Main"),
     assemblyJarName in assembly := { s"${name.value}-${version.value}.jar" },
     test in assembly := {},
   )
   .dependsOn(raft)
 
 lazy val root = (project in file("."))
-  .aggregate(raft, appKvs)
+  .aggregate(raft, appCalc)

@@ -10,7 +10,6 @@ import com.github.rerorero.reroft.raft.RaftConfig
 import com.google.common.net.HostAndPort
 import com.google.protobuf.any.Any
 import com.typesafe.config.ConfigFactory
-import io.grpc.{Status, StatusRuntimeException}
 import scalapb.{GeneratedMessage, GeneratedMessageCompanion, Message}
 
 import scala.concurrent.{ExecutionContext, Future}
