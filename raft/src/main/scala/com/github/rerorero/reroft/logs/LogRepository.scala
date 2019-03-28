@@ -27,9 +27,10 @@ trait LogRepository[Entry <: GeneratedMessage with Message[Entry]] {
   def lastLogTerm(): Long
   def lastLogIndex(): Long
   def contains(term: Long, index: Long): Boolean
-  def removeConflicted(term: Long, index: Long): Unit
+  // removeConflicted removes logs which have term and index after than prevLogTerm and prevLogIndex
+  def removeConflicted(prevLogTerm: Long, prevLogIndex: Long): Unit
   def append(entries: Seq[LogRepoEntry[Entry]]): Unit
   def commit(destIndex: Long): Unit
-  def getLogs(fromIndex: Long): Seq[LogRepoEntry[Entry]]
+  def getLogs(indexFrom: Long, indexTo: Option[Long] = None): Seq[LogRepoEntry[Entry]]
 }
 

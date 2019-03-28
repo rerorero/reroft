@@ -42,7 +42,8 @@ lazy val appCalc = (project in file("app_calc"))
     assemblyJarName in assembly := { s"${name.value}-${version.value}.jar" },
     test in assembly := {},
   )
-  .dependsOn(raft)
+  .dependsOn(raft % "compile->compile;test->test")
+  .enablePlugins(AkkaGrpcPlugin)
 
 lazy val root = (project in file("."))
   .aggregate(raft, appCalc)

@@ -13,11 +13,11 @@ enum Command {
     DIV = 4;
 }
 
-message CalcCommand {
+message CalcEntry {
     Command command = 1;
     double  cdr = 2;
 }
 
 message CalcResult {
-    string value = 1;
+    double result = 1;
 }

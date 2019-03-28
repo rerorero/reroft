@@ -256,7 +256,7 @@ class RaftActorSpec
       val nodes = (1 to 5).map(_ => sample[Node])
       val myID = nodes.reverse.head.id
       val m = new MockedRaftActor(nodes = nodes.toSet, myID = myID, minElectionTimeoutMS = 1000, maxElectionTimeoutMS = 1001)
-      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq(LogRepoEntry[TestEntry](8L, 3L, sample[TestEntry])))
+      when(m.logRepo.getLogs(any[Long], any[Option[Long]])).thenReturn(Seq(LogRepoEntry[TestEntry](8L, 3L, sample[TestEntry])))
       m.sut.setState(Candidate, RaftState.empty.copy(currentTerm = 10L), 10 millisecond)
 
       // 1
@@ -356,7 +356,7 @@ class RaftActorSpec
         )
       )
       val dummyEntry = sample[TestEntry]
-      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq(LogRepoEntry[TestEntry](8L, 3L, dummyEntry)))
+      when(m.logRepo.getLogs(any[Long], any[Option[Long]])).thenReturn(Seq(LogRepoEntry[TestEntry](8L, 3L, dummyEntry)))
       when(m.logRepo.getCommitIndex()).thenReturn(2L)
 
       m.sut.setState(Leader, state, 10 millisecond)
@@ -389,7 +389,7 @@ class RaftActorSpec
         matchIndex = Some(Map.empty),
         nextIndex = nextIndex,
       )
-      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq(LogRepoEntry[TestEntry](8L, 8L, sample[TestEntry]), LogRepoEntry[TestEntry](8L, 9L, sample[TestEntry])))
+      when(m.logRepo.getLogs(any[Long], any[Option[Long]])).thenReturn(Seq(LogRepoEntry[TestEntry](8L, 8L, sample[TestEntry]), LogRepoEntry[TestEntry](8L, 9L, sample[TestEntry])))
       when(m.logRepo.getCommitIndex()).thenReturn(2L)
       m.sut.setState(Leader, state, 10 millisecond)
 
@@ -432,7 +432,7 @@ class RaftActorSpec
 
     "become follower when it discovers stale" in {
       val m = new MockedRaftActor(heartbeatIntervalMS = 1000)
-      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq(LogRepoEntry[TestEntry](8L, 8L, sample[TestEntry]), LogRepoEntry[TestEntry](8L, 9L, sample[TestEntry])))
+      when(m.logRepo.getLogs(any[Long], any[Option[Long]])).thenReturn(Seq(LogRepoEntry[TestEntry](8L, 8L, sample[TestEntry]), LogRepoEntry[TestEntry](8L, 9L, sample[TestEntry])))
       when(m.logRepo.getCommitIndex()).thenReturn(2L)
       val state = RaftState.empty.copy(
         currentTerm = 10L,
@@ -450,7 +450,7 @@ class RaftActorSpec
       val myID = nodes.head._1.id
       val m = new MockedRaftActor(nodes = nodes.map(_._1).toSet, myID = myID, heartbeatIntervalMS = 1000)
       val (entry1, entry2) = (sample[TestEntry], sample[TestEntry])
-      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq(LogRepoEntry[TestEntry](8L, 8L, entry1), LogRepoEntry[TestEntry](8L, 9L, entry2)))
+      when(m.logRepo.getLogs(any[Long], any[Option[Long]])).thenReturn(Seq(LogRepoEntry[TestEntry](8L, 8L, entry1), LogRepoEntry[TestEntry](8L, 9L, entry2)))
       when(m.logRepo.getCommitIndex()).thenReturn(2L)
       val state = RaftState.empty.copy(
         currentTerm = 10L,
@@ -469,7 +469,7 @@ class RaftActorSpec
         currentTerm = 10L,
         nextIndex = m.nodes.map(n => (n.id, 0L)).toMap,
       )
-      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq())
+      when(m.logRepo.getLogs(any[Long], any[Option[Long]])).thenReturn(Seq())
       when(m.logRepo.getCommitIndex()).thenReturn(2L)
       m.sut.setState(Leader, state, 10 millisecond)
 
@@ -486,7 +486,7 @@ class RaftActorSpec
         currentTerm = 10L,
         nextIndex = m.nodes.map(n => (n.id, 0L)).toMap,
       )
-      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq())
+      when(m.logRepo.getLogs(any[Long], any[Option[Long]])).thenReturn(Seq())
       when(m.logRepo.getCommitIndex()).thenReturn(2L)
       m.sut.setState(Leader, state, 10 millisecond)
 
@@ -506,7 +506,7 @@ class RaftActorSpec
       val sender = TestProbe()
       val command = sample[ClientCommand].copy(sender = sender.ref)
       when(m.logRepo.lastLogIndex()).thenReturn(100L)
-      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq())
+      when(m.logRepo.getLogs(any[Long], any[Option[Long]])).thenReturn(Seq())
       m.sut.setState(Leader, state, 10 millisecond)
 
       m.sut ! command
@@ -532,7 +532,7 @@ class RaftActorSpec
       )
       when(m.logRepo.lastLogIndex()).thenReturn(100L)
       when(m.logRepo.lastLogTerm()).thenReturn(2L)
-      when(m.logRepo.getLogs(any[Long])).thenReturn(Seq())
+      when(m.logRepo.getLogs(any[Long], any[Option[Long]])).thenReturn(Seq())
       m.sut.setState(Leader, state, 10 millisecond)
 
       val res = sample[ApplyResult[TestComputed]].copy(index = 3L)
