@@ -47,7 +47,7 @@ class NodeActor(val nodeID: NodeID, val client: RaftService) extends Actor with 
         case Success(res) => parent ! VoteResponse(nodeID, res)
         case Failure(e) => log.error(e, s"failed to vote to ${nodeID.addr}")
       }
-      log.info(s"send vote request to ${nodeID}")
+      log.debug(s"send vote request to ${nodeID}")
 
     case req: AppendEntriesRequest =>
       val parent = sender()
@@ -57,6 +57,6 @@ class NodeActor(val nodeID: NodeID, val client: RaftService) extends Actor with 
         case Success(res) => parent ! AppendResponse(nodeID, res, req.prevLogIndex, lastIndex)
         case Failure(e) => log.error(e, s"failed to appendEntries to ${nodeID.addr}")
       }
-      log.info(s"send append entries request to ${nodeID}")
+      log.debug(s"send append entries request to ${nodeID}")
   }
 }

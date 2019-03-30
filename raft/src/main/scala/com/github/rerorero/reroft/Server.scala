@@ -9,6 +9,7 @@ import akka.util.Timeout
 import com.github.rerorero.reroft.grpc._
 import com.github.rerorero.reroft.logs.LogRepository
 import com.github.rerorero.reroft.raft._
+import com.google.protobuf.empty.Empty
 import scalapb.{GeneratedMessage, GeneratedMessageCompanion, Message}
 
 import scala.concurrent.duration._
@@ -48,8 +49,11 @@ class RaftServiceImpl(raftFSM: ActorRef)(implicit ec: ExecutionContext) extends 
     (raftFSM ? in).mapTo[RequestVoteResponse]
 
   override def clientCommand(in: ClientCommandRequest): Future[ClientCommandResponse] =
-    (raftFSM ? in).mapTo[ClientResponse].flatMap{
+    (raftFSM ? in).mapTo[ClientResponse].flatMap {
       case ClientSuccess(res) => Future.successful(res)
       case ClientFailure(e: Throwable) => Future.failed(e)
     }
+
+  override def statCommand(in: Empty): Future[StatCommandResponse] =
+    (raftFSM ? GetState).mapTo[StatCommandResponse]
 }

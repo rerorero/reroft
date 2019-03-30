@@ -59,6 +59,7 @@ case object ElectionTimeout
 case object StartElection
 case object BroadcastAppendLog
 case class ClientCommand(req: ClientCommandRequest, sender: ActorRef)
+case object GetState
 
 sealed trait ClientResponse
 case class ClientSuccess(res: ClientCommandResponse) extends ClientResponse
@@ -125,7 +126,6 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
     // 3. If an existing entry conflicts with a new one (same index but different terms), delete the existing entry and all that follow it (§5.3)
     // 4. Append any new entries not already in the log
     // 5. If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry)
-
     if (req.term < state.currentTerm) {
       // (1) reject if term is stale
       log.warning(s"[follower] received stale term: received=${req.term} current=${state.currentTerm}")
@@ -144,7 +144,7 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
 
       if (req.prevLogIndex == 0) {
         // empty!
-        log.info(s"[follower] empty!")
+        log.debug(s"[follower] empty!")
         logRepo.empty()
         stateMachine ! Initialize
         (AppendEntriesResponse(newState.currentTerm, true), newState)
@@ -187,7 +187,7 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
       var newState = state
       if (req.term > state.currentTerm) {
         log.info(s"[${stateName}] discover new term from ${req.candidateId} term=${req.term} current=${state.currentTerm}")
-        newState = newState.copy(currentTerm = req.term)
+        newState = newState.clearElectionState.copy(currentTerm = req.term)
       }
 
       if (state.votedFor.map(_.toString() != req.candidateId).getOrElse(false)) {
@@ -199,11 +199,22 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
         (RequestVoteResponse(state.currentTerm, voteGranted = false), newState)
 
       } else {
-        log.info(s"[${stateName}] vote from ${req.candidateId} has accepted")
+        log.debug(s"[${stateName}] vote from ${req.candidateId} has accepted")
         (RequestVoteResponse(state.currentTerm, voteGranted = true), newState.copy(votedFor = Some(NodeID.of(req.candidateId))))
       }
     }
 
+  def handleStat(state: RaftState): StatCommandResponse = StatCommandResponse(
+    nextIndex = state.nextIndex.map(kv => (kv._1.toString(), kv._2)),
+    nodes = Seq(NodeStat(
+      id = myID.toString(),
+      state = stateName.toString,
+      currentTerm = state.currentTerm,
+      lastLogIndex = logRepo.lastLogIndex(),
+      lastLogTerm = logRepo.lastLogTerm(),
+      commitIndex = logRepo.getCommitIndex(),
+    ))
+  )
 
   startWith(Follower, RaftState.empty)
 
@@ -235,7 +246,7 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
       log.info(s"[Candidate] discover new term via vote response from ${dest}, you lose!")
       goto(Follower)
     case Event(VoteResponse(dest, res), state) if res.term < state.currentTerm=>
-      log.info(s"[Candidate] discover stale term via vote response from ${dest}, ignored")
+      log.debug(s"[Candidate] discover stale term via vote response from ${dest}, ignored")
       stay
     case Event(VoteResponse(dest, res), _) if !res.voteGranted  =>
       log.info(s"[Candidate] lose by ${dest}")
@@ -260,7 +271,7 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
     // ELECTION TIMEOUT
     // *************
     case Event(ElectionTimeout, state) =>
-      log.info(s"[Candidate] election timeout")
+      log.debug(s"[Candidate] election timeout")
       self ! StartElection
       stay
 
@@ -296,6 +307,13 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
       context.system.scheduler.scheduleOnce(minElectionTimeoutMS.millis/2, self, command)
       stay
     case Event(ApplyResult(_, _), _) =>
+      stay
+
+    // *************
+    // FOR DEBUG
+    // *************
+    case Event(GetState, state) =>
+      sender ! handleStat(state)
       stay
   }
 
@@ -342,6 +360,13 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
       stay
     case Event(ApplyResult(_, _), _) =>
       stay
+
+    // *************
+    // FOR DEBUG
+    // *************
+    case Event(GetState, state) =>
+      sender ! handleStat(state)
+      stay
   }
 
   //-----------------------
@@ -381,7 +406,7 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
         )
       }
       // TODO: start timer for expiration of waiting response (or wait until election ticker expires?)
-      log.info(s"[Leader] start waiting for append log response: ${}")
+      log.debug(s"[Leader] start waiting for append log response: ${myID}")
       stay using state.copy(matchIndex = Some(Map.empty))
 
     // *************
@@ -455,11 +480,11 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
 
           // if received response from majority, finish waiting
           if (isMajority(newState.matchIndex.fold(0)(_.size))) {
-            log.info(s"[Leader] finish waiting for append log response: ${lastIndex}")
+            log.debug(s"[Leader] finish waiting for append log response: ${lastIndex}")
             newState = newState.copy(matchIndex = None)
           }
 
-          log.info(s"[Leader] accepted appendLogEntries by ${nodeID}, requestedIndex = ${requestedPrevIndex}")
+          log.debug(s"[Leader] accepted appendLogEntries by ${nodeID}, requestedIndex = ${requestedPrevIndex}")
           stay using newState
         }
       }
@@ -511,6 +536,13 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
         c.command.sender ! ClientSuccess(ClientCommandResponse(Some(result.toAny)))
       }
       stay using state.copy(commandQue = notYet)
+
+    // *************
+    // FOR DEBUG
+    // *************
+    case Event(GetState, state) =>
+      sender ! handleStat(state)
+      stay
   }
 
   onTransition {

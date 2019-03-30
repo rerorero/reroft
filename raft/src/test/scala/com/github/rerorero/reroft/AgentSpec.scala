@@ -14,6 +14,7 @@ import com.github.rerorero.reroft.raft.RaftConfig
 import com.github.rerorero.reroft.test.TestUtil
 import com.google.common.net.HostAndPort
 import com.google.protobuf.any.Any
+import com.google.protobuf.empty.Empty
 import com.typesafe.config.ConfigFactory
 import org.mockito.ArgumentMatchers._
 import org.mockito.Mockito._
@@ -57,6 +58,8 @@ class AgentSpec
     override def clientCommand(in: ClientCommandRequest): Future[ClientCommandResponse] = {
       mocked.clientCommand(in)
     }
+
+    override def statCommand(in: Empty): Future[StatCommandResponse] = mocked.statCommand(in)
 
     def run() = Http().bindAndHandleAsync(
       RaftServiceHandler(this),

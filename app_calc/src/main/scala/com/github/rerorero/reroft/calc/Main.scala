@@ -8,13 +8,16 @@ import com.github.rerorero.reroft.raft.RaftConfig
 import com.google.common.net.HostAndPort
 import scalapb.GeneratedMessageCompanion
 
+import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success, Try}
 
 object main {
+  implicit val ec: ExecutionContext = ExecutionContext.global
+
   def main(args: Array[String]): Unit = {
     val opt = for {
       nodes <- sys.props.get("nodes").map(_.split(",").map(HostAndPort.fromString).toSet)
-      me <- sys.props.get("me").map(HostAndPort.fromString)
+      me = HostAndPort.fromString(sys.props.getOrElse("me", "localhost"))
       mode <- sys.props.get("mode")
     } yield (new CalcAgent(RaftConfig(nodes, me)), mode)
 
@@ -23,6 +26,8 @@ object main {
         agent.runServer()
       case (Some((agent, "client")), Success(entry)) =>
         agent.runClientCommand(Seq(entry))
+      case (Some((agent, "stat")), _) =>
+        agent.runStatCommand().foreach(r => println(Agent.statPrettyPrint(r)))
       case _ =>
         exitOnErr("unexpected arguments")
     }
@@ -36,7 +41,7 @@ object main {
           v <- Try(value.toDouble)
         } yield CalcEntry(cmd, v)
       case _ =>
-        Failure(new Exception("unexpecgted command or value"))
+        Failure(new Exception("unexpected command or value"))
     }
 
   def exitOnErr(msg: String): Unit = {

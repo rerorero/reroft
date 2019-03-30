@@ -1,6 +1,7 @@
 syntax = "proto3";
 
 import "google/protobuf/any.proto";
+import "google/protobuf/empty.proto";
 
 option java_multiple_files = true;
 option java_package = "com.github.rerorero.reroft.grpc";
@@ -20,6 +21,8 @@ service RaftService {
     rpc RequestVote(RequestVoteRequest) returns (RequestVoteResponse) {}
     // Invoked by client
     rpc ClientCommand(ClientCommandRequest) returns (ClientCommandResponse) {}
+    // for debug
+    rpc StatCommand(google.protobuf.Empty) returns (StatCommandResponse) {}
 }
 
 message AppendEntriesRequest {
@@ -70,3 +73,18 @@ message ClientCommandResponse {
     google.protobuf.Any computed = 1;
     string redirectTo = 2;
 }
+
+message NodeStat {
+    string id = 1;
+    string state = 2;
+    int64 currentTerm = 4;
+    int64 lastLogIndex = 5;
+    int64 lastLogTerm = 6;
+    int64 commitIndex = 7;
+}
+
+message StatCommandResponse {
+    map<string, int64> nextIndex = 1;
+    repeated NodeStat nodes = 2;
+}
+

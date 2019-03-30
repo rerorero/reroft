@@ -4,11 +4,12 @@ import akka.actor.{ActorRef, ActorSystem}
 import akka.grpc.GrpcClientSettings
 import akka.http.scaladsl.Http
 import akka.stream.{ActorMaterializer, Materializer}
-import com.github.rerorero.reroft.grpc.{ClientCommandRequest, ClientCommandResponse, RaftServiceClient}
+import com.github.rerorero.reroft.grpc.{ClientCommandRequest, ClientCommandResponse, RaftServiceClient, StatCommandResponse}
 import com.github.rerorero.reroft.logs.LogRepository
-import com.github.rerorero.reroft.raft.RaftConfig
+import com.github.rerorero.reroft.raft.{Leader, RaftConfig}
 import com.google.common.net.HostAndPort
 import com.google.protobuf.any.Any
+import com.google.protobuf.empty.Empty
 import com.typesafe.config.ConfigFactory
 import scalapb.{GeneratedMessage, GeneratedMessageCompanion, Message}
 
@@ -55,5 +56,51 @@ abstract class Agent[Entry <: GeneratedMessage with Message[Entry], Computed <: 
       case ClientCommandResponse(None, redirectTo) =>
         getCLient(HostAndPort.fromString(redirectTo)).clientCommand(req).map(_.computed.get.unpack[Computed])
     }
+  }
+
+  def runStatCommand(): Future[StatCommandResponse] =
+    Future.traverse(config.clusterNodes)(getCLient(_).statCommand(Empty()))
+      .map(_.foldLeft(StatCommandResponse()) {
+        case (acc, result) =>
+          val isLeader = result.nodes.headOption.map(_.state == Leader.toString).getOrElse(false)
+          StatCommandResponse(
+            nextIndex = if (isLeader) result.nextIndex else acc.nextIndex,
+            nodes = acc.nodes ++ result.nodes,
+          )
+      })
+}
+
+object Agent {
+  def statPrettyPrint(r: StatCommandResponse): String = {
+    val sb = new StringBuilder()
+    val crlf = sys.props("line.separator")
+
+    sb.append("[Next Index]")
+    sb.append(crlf)
+    r.nextIndex.foreach{
+      case (id, idx) =>
+        sb.append(s"  ${id} : ${idx}")
+        sb.append(crlf)
+    }
+
+    sb.append(crlf)
+    sb.append("[Node]")
+    r.nodes.sortBy(_.id).zipWithIndex.foreach{
+      case (node, i) =>
+        sb.append(s"  (${i}) ${node.id}")
+        sb.append(crlf)
+        sb.append(s"         state : ${node.state}")
+        sb.append(crlf)
+        sb.append(s"         current term : ${node.currentTerm}")
+        sb.append(crlf)
+        sb.append(s"         last term : ${node.lastLogTerm}")
+        sb.append(crlf)
+        sb.append(s"         last index : ${node.lastLogIndex}")
+        sb.append(crlf)
+        sb.append(s"         commit index : ${node.commitIndex}")
+        sb.append(crlf)
+        sb.append(crlf)
+    }
+    sb.toString()
   }
 }
