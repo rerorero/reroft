@@ -3,7 +3,7 @@ package com.github.rerorero.reroft.raft
 import akka.actor.ActorSystem
 import akka.stream.{ActorMaterializer, Materializer}
 import akka.testkit.{ImplicitSender, TestFSMRef, TestKit, TestProbe}
-import com.github.rerorero.reroft.fsm.{Apply, ApplyResult, Initialize}
+import com.github.rerorero.reroft.fsm.{Apply, ApplyResult}
 import com.github.rerorero.reroft.grpc._
 import com.github.rerorero.reroft.grpc.test.{TestComputed, TestEntry}
 import com.github.rerorero.reroft.logs.{LogRepoEntry, LogRepository}
@@ -87,21 +87,6 @@ class RaftActorSpec
 
       m.sut ! sample[AppendEntriesRequest].withTerm(99L)
       expectMsg(AppendEntriesResponse(100L, false))
-    }
-
-    "remove all when receives zero prevIndex" in  {
-      val m = new MockedRaftActor()
-      val state = RaftState.empty.copy(currentTerm = 100L)
-      m.sut.setState(Follower, state, 10 millisecond)
-
-      m.sut ! sample[AppendEntriesRequest]
-        .withPrevLogIndex(0L)
-        .withTerm(101L)
-        .withEntries(Seq.empty)
-      expectMsg(AppendEntriesResponse(101L, true))
-      m.stateMachine.expectMsg(Initialize)
-      verify(m.logRepo, times(1)).empty()
-      assert(m.sut.stateData.currentTerm === 101L)
     }
 
     "reject if it has no logs" in  {
@@ -362,8 +347,8 @@ class RaftActorSpec
       m.sut.setState(Leader, state, 10 millisecond)
       m.sut ! BroadcastAppendLog
 
-      nodes(1)._2.expectMsg(AppendEntriesRequest(10L, state.leaderID.get.toString(), 1L, 8L, Seq(LogRepoEntry(8L, 3L, dummyEntry).toMessage), 2L))
-      nodes(2)._2.expectMsg(AppendEntriesRequest(10L, state.leaderID.get.toString(), 2L, 8L, Seq(LogRepoEntry(8L, 3L, dummyEntry).toMessage), 2L))
+      nodes(1)._2.expectMsg(AppendEntriesRequest(10L, state.leaderID.get.toString(), 0L, 8L, Seq(LogRepoEntry(8L, 3L, dummyEntry).toMessage), 2L))
+      nodes(2)._2.expectMsg(AppendEntriesRequest(10L, state.leaderID.get.toString(), 1L, 8L, Seq(LogRepoEntry(8L, 3L, dummyEntry).toMessage), 2L))
       nodes(0)._2.expectNoMessage(100 millisecond)
       assert(m.sut.stateData.matchIndex === Some(Map.empty))
 
@@ -394,10 +379,10 @@ class RaftActorSpec
       m.sut.setState(Leader, state, 10 millisecond)
 
       // receive from 1
-      m.sut ! AppendResponse(nodes(1)._1.id, AppendEntriesResponse(10L, true), 1L, Some(9L))
+      m.sut ! AppendResponse(nodes(1)._1.id, AppendEntriesResponse(10L, true), 0L, Some(9L))
       assert(m.sut.stateData.matchIndex === Some(Map(nodes(1)._1.id -> 9L)))
       assert(m.sut.stateData.nextIndex === Map(
-        nodes(1)._1.id -> 9L,
+        nodes(1)._1.id -> 10L,
         nodes(2)._1.id -> 2L,
         nodes(3)._1.id -> 3L,
         nodes(4)._1.id -> 4L,
@@ -405,26 +390,26 @@ class RaftActorSpec
       verify(m.logRepo, never()).commit(any[Long])
 
       // receive from 2
-      m.sut ! AppendResponse(nodes(2)._1.id, AppendEntriesResponse(10L, true), 2L, Some(10L))
+      m.sut ! AppendResponse(nodes(2)._1.id, AppendEntriesResponse(10L, true), 1L, Some(10L))
       assert(m.sut.stateData.matchIndex === Some(Map(
         nodes(1)._1.id -> 9L,
         nodes(2)._1.id -> 10L,
       )))
       assert(m.sut.stateData.nextIndex === Map(
-        nodes(1)._1.id -> 9L,
-        nodes(2)._1.id -> 10L,
+        nodes(1)._1.id -> 10L,
+        nodes(2)._1.id -> 11L,
         nodes(3)._1.id -> 3L,
         nodes(4)._1.id -> 4L,
       ))
       verify(m.logRepo, never()).commit(any[Long])
 
       // receive from 2
-      m.sut ! AppendResponse(nodes(3)._1.id, AppendEntriesResponse(10L, true), 3L, Some(11L))
+      m.sut ! AppendResponse(nodes(3)._1.id, AppendEntriesResponse(10L, true), 2L, Some(11L))
       assert(m.sut.stateData.matchIndex === None)
       assert(m.sut.stateData.nextIndex === Map(
-        nodes(1)._1.id -> 9L,
-        nodes(2)._1.id -> 10L,
-        nodes(3)._1.id -> 11L,
+        nodes(1)._1.id -> 10L,
+        nodes(2)._1.id -> 11L,
+        nodes(3)._1.id -> 12L,
         nodes(4)._1.id -> 4L,
       ))
       verify(m.logRepo, times(1)).commit(9L)
@@ -459,8 +444,9 @@ class RaftActorSpec
       )
       m.sut.setState(Leader, state, 10 millisecond)
 
-      m.sut ! AppendResponse(nodes(1)._1.id, AppendEntriesResponse(10L, false), 5L, Some(1L))
-      nodes(1)._2.expectMsg(AppendEntriesRequest(10L, myID.toString(), 4L, 8L, Seq(LogRepoEntry(8L, 8L, entry1), LogRepoEntry(8L, 9L, entry2)).map(_.toMessage), 2L))
+      m.sut ! AppendResponse(nodes(1)._1.id, AppendEntriesResponse(10L, false), 4L, Some(1L))
+      nodes(1)._2.expectMsg(AppendEntriesRequest(10L, myID.toString(), 3L, 8L, Seq(LogRepoEntry(8L, 8L, entry1), LogRepoEntry(8L, 9L, entry2)).map(_.toMessage), 2L))
+      assert(m.sut.stateData.nextIndex === Map(nodes(1)._1.id -> 4L))
     }
 
     "become follower when it receives heartbeat contains newer term" in {
@@ -469,6 +455,7 @@ class RaftActorSpec
         currentTerm = 10L,
         nextIndex = m.nodes.map(n => (n.id, 0L)).toMap,
       )
+      when(m.logRepo.contains(any[Long], any[Long])).thenReturn(true)
       when(m.logRepo.getLogs(any[Long], any[Option[Long]])).thenReturn(Seq())
       when(m.logRepo.getCommitIndex()).thenReturn(2L)
       m.sut.setState(Leader, state, 10 millisecond)

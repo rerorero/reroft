@@ -4,6 +4,9 @@ import akka.actor.{Actor, ActorLogging, Props}
 import com.github.rerorero.reroft.fsm.{Apply, ApplyResult, Initialize}
 import com.github.rerorero.reroft.grpc.calc.{CalcEntry, CalcResult, Command}
 
+case object GetComputed // for debug
+case class GetComputedRes(applyIndex: Long, computed: Double)
+
 class StateMachine(logs: Logs) extends Actor with ActorLogging {
   var applyIndex = 0L
   var computed: Double = 0L
@@ -38,6 +41,9 @@ class StateMachine(logs: Logs) extends Actor with ActorLogging {
     case Initialize =>
       applyIndex = 0L
       computed = 0L
+
+    case GetComputed =>
+      sender ! GetComputedRes(applyIndex, computed)
   }
 }
 

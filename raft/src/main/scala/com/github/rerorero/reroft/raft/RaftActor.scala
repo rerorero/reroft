@@ -1,7 +1,7 @@
 package com.github.rerorero.reroft.raft
 
 import akka.actor.{ActorRef, Cancellable, LoggingFSM, Props}
-import com.github.rerorero.reroft.fsm.{Apply, ApplyResult, Initialize}
+import com.github.rerorero.reroft.fsm.{Apply, ApplyResult}
 import com.github.rerorero.reroft.grpc._
 import com.github.rerorero.reroft.logs.{LogRepoEntry, LogRepository}
 import scalapb.{GeneratedMessage, GeneratedMessageCompanion, Message}
@@ -10,6 +10,7 @@ import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 import scala.util.Random
 
+case class ClientCommand(req: ClientCommandRequest, sender: ActorRef)
 case class CommandQueEntity(command: ClientCommand, lastLogIndex: Long)
 
 // RaftActor state
@@ -58,7 +59,6 @@ case object Leader extends Role
 case object ElectionTimeout
 case object StartElection
 case object BroadcastAppendLog
-case class ClientCommand(req: ClientCommandRequest, sender: ActorRef)
 case object GetState
 
 sealed trait ClientResponse
@@ -110,7 +110,7 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
 
   def nodeOf(id: NodeID) = clusterNodes.filter(_.id == id).headOption.getOrElse(throw new Exception(s"no such id in clusterNodes: ${id}"))
 
-  def isMajority(n: Int) = n > (clusterNodes.size/2.0)
+  def isMajority(n: Int) = n > (clusterNodes.size / 2.0)
 
   def flushClientCommandQueue(que: Seq[CommandQueEntity]): Unit = que.foreach { c =>
     c.command.sender ! ClientFailure(new Exception("request is out of date"))
@@ -128,7 +128,7 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
     // 5. If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry)
     if (req.term < state.currentTerm) {
       // (1) reject if term is stale
-      log.warning(s"[follower] received stale term: received=${req.term} current=${state.currentTerm}")
+      logWarn(s"received stale term: received=${req.term} current=${state.currentTerm}")
       (AppendEntriesResponse(state.currentTerm, false), state)
 
     } else {
@@ -138,20 +138,13 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
       var newState = state.copy(leaderID = Some(NodeID.of(req.leaderID)))
       // If one server’s current term is smaller than the other’s, then it updates its current term to the larger value.
       if (req.term > state.currentTerm) {
-        log.warning(s"[follower] discovered stale term: received=${req.term} current=${state.currentTerm}")
+        logWarn(s"discovered stale term: received=${req.term} current=${state.currentTerm}")
         newState = newState.copy(currentTerm = req.term)
       }
 
-      if (req.prevLogIndex == 0) {
-        // empty!
-        log.debug(s"[follower] empty!")
-        logRepo.empty()
-        stateMachine ! Initialize
-        (AppendEntriesResponse(newState.currentTerm, true), newState)
-
-      } else if (!logRepo.contains(req.prevLogTerm, req.prevLogIndex)) {
+      if (!logRepo.contains(req.prevLogTerm, req.prevLogIndex)) {
         // (2) reject if log doesn't contain a matching previous entry
-        log.warning(s"[follower] prevLog is inconsistent: received=(${req.prevLogTerm},${req.prevLogIndex})")
+        logWarn(s"prevLog is inconsistent: received=(${req.prevLogTerm},${req.prevLogIndex})")
         (AppendEntriesResponse(newState.currentTerm, false), newState)
 
       } else {
@@ -164,7 +157,7 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
         // (5) commit and update commitIndex
         if (req.leaderCommit > logRepo.getCommitIndex()) {
           logRepo.commit(req.leaderCommit)
-          log.info(s"[follower] new logs are committed: newIndex=${req.leaderCommit}")
+          logInfo(s"new logs are committed: newIndex=${req.leaderCommit}")
         }
 
         // start to apply logs
@@ -180,26 +173,26 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
   //    least as up-to-date as receiver’s log, grant vote (§5.2, §5.4)
   def handleVoteRequest(req: RequestVoteRequest, state: RaftState): (RequestVoteResponse, RaftState) =
     if (req.term < state.currentTerm) {
-      log.info(s"[${stateName}] reject ${req.candidateId} due to stale term")
+      logInfo(s"reject ${req.candidateId} due to stale term")
       (RequestVoteResponse(state.currentTerm, voteGranted = false), state)
 
     } else {
       var newState = state
       if (req.term > state.currentTerm) {
-        log.info(s"[${stateName}] discover new term from ${req.candidateId} term=${req.term} current=${state.currentTerm}")
+        logInfo(s"discover new term from ${req.candidateId} term=${req.term} current=${state.currentTerm}")
         newState = newState.clearElectionState.copy(currentTerm = req.term)
       }
 
       if (state.votedFor.map(_.toString() != req.candidateId).getOrElse(false)) {
-        log.info(s"[${stateName}] reject ${req.candidateId} because I've already voted ${state.votedFor}")
+        logInfo(s"reject ${req.candidateId} because I've already voted ${state.votedFor}")
         (RequestVoteResponse(state.currentTerm, voteGranted = false), newState)
 
       } else if (req.lastLogIndex < logRepo.lastLogIndex() || req.lastLogTerm < logRepo.lastLogTerm()) {
-        log.info(s"[${stateName}] reject ${req.candidateId} dee to stale log")
+        logInfo(s"reject ${req.candidateId} dee to stale log")
         (RequestVoteResponse(state.currentTerm, voteGranted = false), newState)
 
       } else {
-        log.debug(s"[${stateName}] vote from ${req.candidateId} has accepted")
+        logDebug(s"vote from ${req.candidateId} has accepted")
         (RequestVoteResponse(state.currentTerm, voteGranted = true), newState.copy(votedFor = Some(NodeID.of(req.candidateId))))
       }
     }
@@ -216,12 +209,20 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
     ))
   )
 
+  def logDebug(m: String) = log.debug(s"[${myID.toString()}](${stateName.toString}) ${m}")
+
+  def logInfo(m: String) = log.info(s"[${myID.toString()}](${stateName.toString}) ${m}")
+
+  def logWarn(m: String) = log.warning(s"[${myID.toString()}](${stateName.toString}) ${m}")
+
+  def logError(m: String) = log.error(s"[${myID.toString()}](${stateName.toString}) ${m}")
+
   startWith(Follower, RaftState.empty)
 
   //-----------------------
   //  CANDIDATE
   //-----------------------
-  when(Candidate){
+  when(Candidate) {
     // *************
     // START ELECTION
     // *************
@@ -231,7 +232,7 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
       val newTerm = state.currentTerm + 1
       val req = RequestVoteRequest(newTerm, myID.toString(), logRepo.lastLogIndex(), logRepo.lastLogTerm())
       otherNodes.map(_.actor ! req)
-      log.info(s"[Candidate] election ${newTerm} started!")
+      logInfo(s"election ${newTerm} started!")
       stay using state.clearElectionState.copy(currentTerm = newTerm)
 
     case Event(req: RequestVoteRequest, state) =>
@@ -243,19 +244,19 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
     // VOTE RESPONSE
     // *************
     case Event(VoteResponse(dest, res), state) if res.term > state.currentTerm =>
-      log.info(s"[Candidate] discover new term via vote response from ${dest}, you lose!")
+      logInfo(s"discover new term via vote response from ${dest}, you lose!")
       goto(Follower)
-    case Event(VoteResponse(dest, res), state) if res.term < state.currentTerm=>
-      log.debug(s"[Candidate] discover stale term via vote response from ${dest}, ignored")
+    case Event(VoteResponse(dest, res), state) if res.term < state.currentTerm =>
+      logDebug(s"discover stale term via vote response from ${dest}, ignored")
       stay
-    case Event(VoteResponse(dest, res), _) if !res.voteGranted  =>
-      log.info(s"[Candidate] lose by ${dest}")
+    case Event(VoteResponse(dest, res), _) if !res.voteGranted =>
+      logInfo(s"lose by ${dest}")
       stay
     case Event(VoteResponse(dest, res), state) =>
-      log.info(s"[Candidate] granted from ${dest}")
+      logInfo(s"granted from ${dest}")
       var newState = state.copy(granted = state.granted + dest)
       if (isMajority(newState.granted.size)) {
-        log.info(s"[Candidate] granted by majority, you win!")
+        logInfo(s"granted by majority, you win!")
         val lastLogIndex = logRepo.lastLogIndex()
         newState = newState.clearElectionState.copy(
           leaderID = Some(myID),
@@ -271,7 +272,7 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
     // ELECTION TIMEOUT
     // *************
     case Event(ElectionTimeout, state) =>
-      log.debug(s"[Candidate] election timeout")
+      logDebug(s"election timeout")
       self ! StartElection
       stay
 
@@ -284,7 +285,7 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
     // state. If the term in the RPC is smaller than the candidate’s
     // current term, then the candidate rejects the RPC and continues in candidate state.
     case Event(req: AppendEntriesRequest, state) if req.term >= state.currentTerm =>
-      log.info(s"[Candidate] discover new leader's request ${req.leaderID}")
+      logInfo(s"discover new leader's request ${req.leaderID}")
       val (res, newState) = handleAppendLogRequest(req, state.copy(
         currentTerm = req.term,
         leaderID = Some(NodeID.of(req.leaderID)),
@@ -294,17 +295,20 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
       sender ! res
       goto(Follower) using newState
     case Event(req: AppendEntriesRequest, state) =>
-      log.info(s"[Candidate] discover stale leader's request ${req.leaderID}")
+      logInfo(s"discover stale leader's request ${req.leaderID}")
       sender ! AppendEntriesResponse(state.currentTerm, false)
       stay
 
     // *************
     // CLIENT COMMAND
     // *************
+    case Event(r: ClientCommandRequest, _) =>
+      self ! ClientCommand(r, sender)
+      stay
     case Event(command: ClientCommand, _) =>
-      log.info(s"[Candidate] receives client command, delay message")
+      logInfo(s"receives client command, delay message")
       // TODO: handle timeout or limit the number of retries
-      context.system.scheduler.scheduleOnce(minElectionTimeoutMS.millis/2, self, command)
+      context.system.scheduler.scheduleOnce(minElectionTimeoutMS.millis / 2, self, command)
       stay
     case Event(ApplyResult(_, _), _) =>
       stay
@@ -333,7 +337,7 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
     // ELECTION TIMEOUT
     // *************
     case Event(ElectionTimeout, state) =>
-      log.info("[follower] timeout")
+      logInfo("timeout")
       // start election
       // increment term and transit to candidate
       goto(Candidate) using state.clearElectionState
@@ -349,8 +353,11 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
     // *************
     // CLIENT COMMAND
     // *************
+    case Event(r: ClientCommandRequest, _) =>
+      self ! ClientCommand(r, sender)
+      stay
     case Event(command: ClientCommand, state) =>
-      log.info(s"[follower] receives client command")
+      logInfo(s"receives client command")
       state.leaderID match {
         case Some(leader) => command.sender ! ClientSuccess(ClientCommandResponse(None, leader.toString()))
         case None =>
@@ -389,111 +396,117 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
     // HEARTBEAT INTERVAL or START APPEND LOG
     // *************
     case Event(BroadcastAppendLog, state) if state.matchIndex.nonEmpty =>
-      log.info("[Leader] tick during logAppending, delayed next tick")
+      logDebug(s"tick during logAppending, delayed next tick: ${state.matchIndex}")
       stay
     case Event(BroadcastAppendLog, state) =>
-      otherNodes.map { node =>
-        val prevIndex = state.nextIndex.getOrElse(node.id, throw new Exception(s"no such key in nextIndex: ${node.id}"))
-        val logs = logRepo.getLogs(prevIndex)
-        val logTerm = logs.headOption.map(_.term).getOrElse(0L)
+      otherNodes.foreach { node =>
+        // TODO: cache prevLogIndex and prevLogTerm
+        val nextIndex = state.nextIndex.getOrElse(node.id, throw new Exception(s"no such key in nextIndex: ${node.id}"))
+        val logs = logRepo.getLogs(nextIndex)
+        val prevLogIndex = if (nextIndex > 0) nextIndex - 1 else 0L
+        val prevLogTerm = if (nextIndex > 0) logRepo.getLogs(prevLogIndex, Some(prevLogIndex)).headOption.map(_.term).getOrElse(0L) else 0L
+        val leaderCommitIndex = logRepo.getCommitIndex()
         node.actor ! AppendEntriesRequest(
           term = state.currentTerm,
           leaderID = myID.toString(),
-          prevLogIndex = prevIndex,
-          prevLogTerm = logTerm,
+          prevLogIndex = prevLogIndex,
+          prevLogTerm = prevLogTerm,
           entries = logs.map(_.toMessage),
-          leaderCommit = logRepo.getCommitIndex(),
+          leaderCommit = leaderCommitIndex,
         )
+        logInfo(s"send appendEntriesRequest to=${node.id.toString()}, prevLog=${prevLogIndex},${prevLogTerm}, logs=${logs.length}, leaderCommit=${leaderCommitIndex}")
       }
       // TODO: start timer for expiration of waiting response (or wait until election ticker expires?)
-      log.debug(s"[Leader] start waiting for append log response: ${myID}")
+      logInfo(s"start waiting for append log response: ${myID}")
       stay using state.copy(matchIndex = Some(Map.empty))
 
     // *************
     // APPEND LOG RESPONSE
     // *************
     case Event(AppendResponse(nodeID, _, _, _), state) if !state.nextIndex.contains(nodeID) =>
-      log.warning(s"[Leader] AppendResponse from unknown node: ${nodeID}")
+      logWarn(s"AppendResponse from unknown node: ${nodeID}")
       stay
-    case Event(AppendResponse(nodeID, res, requestedPrevIndex, lastIndex), state) =>
+    case Event(AppendResponse(nodeID, res, _, _), state) if res.term > state.currentTerm =>
+      logInfo(s"detect new term from ${nodeID}")
+      state.commandQue.foreach(c => c.command.sender ! ClientFailure(new Exception("detected new term, request is now out of date")))
+      goto(Follower) using state.copy(
+        leaderID = None,
+        commandQue = List.empty,
+      )
+    case Event(AppendResponse(nodeID, res, _, _), state) if !res.success =>
+      // TODO: cache prevLogIndex and prevLogTerm
+      //  If AppendEntries fails because of log inconsistency decrement nextIndex and retry (§5.3)
+      var nextIndex = state.nextIndex.getOrElse(nodeID, throw new Exception(s"no such key in nextIndex: ${nodeID}")) - 1
+      if (nextIndex < 0) nextIndex = 0L
+      val prevLogIndex = if (nextIndex > 0) nextIndex - 1 else 0L
+      val prevLogTerm = if (nextIndex > 0) logRepo.getLogs(prevLogIndex, Some(prevLogIndex)).headOption.map(_.term).getOrElse(0L) else 0L
+      val logs = logRepo.getLogs(nextIndex)
+      nodeOf(nodeID).actor ! AppendEntriesRequest(
+        term = state.currentTerm,
+        leaderID = myID.toString(),
+        prevLogIndex = prevLogIndex,
+        prevLogTerm = prevLogTerm,
+        entries = logs.map(_.toMessage),
+        leaderCommit = logRepo.getCommitIndex(),
+      )
+
+      logInfo(s"rejected appendLogEntries by ${nodeOf(nodeID).id}, retry with index=${prevLogIndex}")
+      stay using state.copy(
+        nextIndex = state.nextIndex.updated(nodeID, nextIndex)
+      )
+    case Event(AppendResponse(nodeID, _, requestedPrevIndex, _), state) if (state.nextIndex(nodeID)-1) != requestedPrevIndex =>
+      // TODO: state.nextIndex(nodeID) is not safe
+      logInfo(s"received unexpected response, ignored: current=${state.nextIndex(nodeID)}, requested=${requestedPrevIndex}")
+      stay
+    case Event(AppendResponse(nodeID, _, requestedPrevIndex, lastIndex), state) =>
       // lastIndex is last index of logs sent to node, so it is None when it sends empty logs (i.e. just a heartbeat)
-      state.matchIndex.fold (stay) { matchIndex =>
-        val currentNextIndex = state.nextIndex(nodeID)
+      val (matched, next) = lastIndex match {
+        case Some(last) => (last, last + 1) // new next index
+        case None =>
+          val next = state.nextIndex.getOrElse(nodeID, throw new Exception(s"no such key in nexIndex: ${nodeID}")) // index has not updated
+          (next-1, next)
+      }
+      val newNextIndex = state.nextIndex.updated(nodeID, next)
+      val currentCommitIndex = logRepo.getCommitIndex()
 
-        if (res.term > state.currentTerm) {
-          log.info(s"[Leader] detect new term from ${nodeID}")
-          state.commandQue.foreach(c => c.command.sender ! ClientFailure(new Exception("detected new term, request is now out of date")))
-          goto(Follower) using state.copy(
-            leaderID = None,
-            commandQue = List.empty,
-          )
-
-        } else if (!res.success) {
-          //  If AppendEntries fails because of log inconsistency decrement nextIndex and retry (§5.3)
-          val prevIndex = state.nextIndex.getOrElse(nodeID, throw new Exception(s"no such key in nextIndex: ${nodeID}")) - 1
-          val logs = logRepo.getLogs(prevIndex)
-          nodeOf(nodeID).actor ! AppendEntriesRequest(
-            term = state.currentTerm,
-            leaderID = myID.toString(),
-            prevLogIndex = prevIndex,
-            prevLogTerm = logs.headOption.map(_.term).getOrElse(0L),
-            entries = logs.map(_.toMessage),
-            leaderCommit = logRepo.getCommitIndex(),
-          )
-
-          log.info(s"[Leader] rejected appendLogEntries by ${nodeID}, retry with index=${prevIndex}")
-          stay using state.copy(
-            nextIndex = state.nextIndex.updated(nodeID, prevIndex)
-          )
-
-        } else if(currentNextIndex != requestedPrevIndex) {
-          log.info(s"[Leader] received unexpected response, ignored: current=${currentNextIndex}, requested=${requestedPrevIndex}")
-          stay
-
-        } else {
-          var newState = lastIndex.map { lastLogIndex =>
-            val newMatchIndex = matchIndex.updated(nodeID, lastLogIndex)
-            val newNextIndex = state.nextIndex.updated(nodeID, lastLogIndex)
-
-            // If there exists an N such that N > commitIndex, a majority
-            // of matchIndex[i] ≥ N, and log[N].term == currentTerm:
-            // set commitIndex = N (§5.3, §5.4).
-            val currentCommitIndex = logRepo.getCommitIndex()
-            val newCommitIndex = newMatchIndex.values.filter(_ > currentCommitIndex).map ( n =>
-              isMajority(newMatchIndex.values.filter(_ >= n).size) match {
-                case true => Some(n)
-                case false => None
-              }
-            ).flatten.headOption.getOrElse(currentCommitIndex)
-
-            if (newCommitIndex > currentCommitIndex) {
-              log.info(s"[Leader] new commit index! ${currentCommitIndex} -> ${newCommitIndex}")
-              logRepo.commit(newCommitIndex)
-            }
-
-            state.copy(
-              matchIndex = Some(newMatchIndex),
-              nextIndex = newNextIndex,
-            )
-
-          }.getOrElse(state)
-
-          // if received response from majority, finish waiting
-          if (isMajority(newState.matchIndex.fold(0)(_.size))) {
-            log.debug(s"[Leader] finish waiting for append log response: ${lastIndex}")
-            newState = newState.copy(matchIndex = None)
+      val newMatchIndex = state.matchIndex.flatMap { matchIndex =>
+        // If there exists an N such that N > commitIndex, a majority
+        // of matchIndex[i] ≥ N, and log[N].term == currentTerm:
+        // set commitIndex = N (§5.3, §5.4).
+        val matchIndexUpdated = matchIndex.updated(nodeID, matched)
+        val newCommitIndex = matchIndexUpdated.values.filter(_ > currentCommitIndex).map(n =>
+          isMajority(matchIndexUpdated.values.filter(_ >= n).size) match {
+            case true => Some(n)
+            case false => None
           }
+        ).flatten.headOption.getOrElse(currentCommitIndex)
 
-          log.debug(s"[Leader] accepted appendLogEntries by ${nodeID}, requestedIndex = ${requestedPrevIndex}")
-          stay using newState
+        if (newCommitIndex > currentCommitIndex) {
+          logInfo(s"new commit index! ${currentCommitIndex} -> ${newCommitIndex}")
+          logRepo.commit(newCommitIndex)
+        }
+
+        // if received response from majority, finish waiting
+        if (isMajority(matchIndexUpdated.size)) {
+          logInfo(s"finish waiting for append log response: ${lastIndex}")
+          None
+        } else {
+          Some(matchIndexUpdated)
         }
       }
+
+      val newState = state.copy(
+        matchIndex = newMatchIndex,
+        nextIndex = newNextIndex,
+      )
+      logInfo(s"accepted appendLogEntries by ${nodeID}, requestedIndex = ${requestedPrevIndex}, match=${newMatchIndex}, next=${newNextIndex}, last=${lastIndex}")
+      stay using newState
 
     // *************
     // APPEND LOG REQUEST FROM OTHERS
     // *************
     case Event(req: AppendEntriesRequest, state) if req.term > state.currentTerm =>
-      log.info(s"[Leader] discover new leader's request ${req.leaderID}")
+      logInfo(s"discover new leader's request ${req.leaderID}")
       val (res, newState) = handleAppendLogRequest(req, state)
       sender ! res
       state.commandQue.foreach(c => c.command.sender ! ClientFailure(new Exception("detected new leader, request is now out of date")))
@@ -502,15 +515,18 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
         commandQue = List.empty,
       )
     case Event(req: AppendEntriesRequest, state) =>
-      log.info(s"[Leader] discover stale leader's request ${req.leaderID}")
+      logInfo(s"discover stale leader's request ${req.leaderID}")
       sender ! AppendEntriesResponse(state.currentTerm, false)
       stay
 
     // *************
     // CLIENT COMMAND
     // *************
+    case Event(r: ClientCommandRequest, _) =>
+      self ! ClientCommand(r, sender)
+      stay
     case Event(command: ClientCommand, state) =>
-      log.info(s"[Leader] receives client command")
+      logInfo(s"receives client command")
 
       val lastIndex = logRepo.lastLogIndex()
       val logs = command.req.entries.zipWithIndex.map {
@@ -522,19 +538,20 @@ class RaftActor[Entry <: GeneratedMessage with Message[Entry], Computed <: Gener
       stateMachine ! Apply(newLastIndex)
       // TODO: handle timeout
       self ! BroadcastAppendLog
-      log.info(s"[Leader] waiting for logs are committed until index=${newLastIndex}")
+      logInfo(s"waiting for logs are committed until index=${newLastIndex}")
 
       stay using state.copy(
         // record the command with index so that sender of command (gRPC server) can wait corresponding response of the request asynchronously
         commandQue = CommandQueEntity(command, newLastIndex) :: state.commandQue
       )
-    case Event(result: ApplyResult[Computed], state) => // TODO: type erasure
+    case Event(result: ApplyResult[Computed], state) => // TODO: unsafe due to type erasure
       // takes out a command that apply has completed and returns the result to the caller
       val (done, notYet) = state.commandQue.partition(_.lastLogIndex <= result.index)
       done.foreach { c =>
         // this is not precise, delayed responses of request also have latest computed results
         c.command.sender ! ClientSuccess(ClientCommandResponse(Some(result.toAny)))
       }
+      logInfo(s"receive applyResult: notYet=${notYet}")
       stay using state.copy(commandQue = notYet)
 
     // *************

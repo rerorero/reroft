@@ -57,8 +57,8 @@ class Logs(implicit system: ActorSystem) extends LogRepository[CalcEntry] {
       case (from, None) if from >= 0 =>
         entries.drop(from)
       case (from, to) =>
-        // TODO: handle error
-        log.error(s"unknown range: ${indexFrom} - ${indexTo}, from=${from} to=${to}")
+        // out of range
+        log.debug(s"unknown range: ${indexFrom} - ${indexTo}, from=${from} to=${to}")
         Seq.empty
     }
 }
